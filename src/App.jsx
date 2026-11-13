@@ -158,7 +158,7 @@ export default function App() {
       instagram_profile_url: form.instagram_profile_url.trim() || `https://www.instagram.com/${handle}/`,
       website_url: form.website_url?.trim() || null,
       location: form.location?.trim() || null,
-      category: form.business_type?.trim() || null,
+      business_type: form.business_type?.trim() || null,
       opportunity: form.opportunity?.trim() || null,
       notes: form.notes?.trim() || null
     };
@@ -184,8 +184,17 @@ export default function App() {
     if (error) notify(error.message); else { setSelected(null); notify("Lead deleted."); loadLeads(); }
   }
   async function saveDraft(lead, text) {
-    const { error } = await supabase.from("outreach_leads").update({ dm_draft: text, status: lead.status === "new" ? "drafted" : lead.status }).eq("id", lead.id);
-    if (error) notify(error.message); else { notify("Draft saved."); await loadLeads(); }
+    const payload = { user_id: session.user.id, lead_id: lead.id, message_text: text, status: "draft" };
+    const result = lead.latestDraftId
+      ? await supabase.from("outreach_dm_drafts").update({ message_text: text, status: "draft" }).eq("id", lead.latestDraftId)
+      : await supabase.from("outreach_dm_drafts").insert(payload);
+    if (result.error) { notify(result.error.message); return; }
+    if (["new", "researched"].includes(lead.status)) {
+      const { error } = await supabase.from("outreach_leads").update({ status: "draft_ready" }).eq("id", lead.id);
+      if (error) notify(error.message);
+    }
+    await supabase.from("outreach_activity").insert({ user_id: session.user.id, lead_id: lead.id, event_type: "dm_drafted", details: "DM draft saved" });
+    notify("Draft saved."); await loadLeads();
   }
   async function importCsv(file) {
     setBusyImport(true);
@@ -199,7 +208,7 @@ export default function App() {
           user_id: session.user.id, business_name: row.business_name || row.name,
           instagram_handle: handle, instagram_profile_url: row.instagram_url || row.instagram_profile_url || `https://www.instagram.com/${handle}/`,
           website_url: row.website_url || row.website || "", location: row.location || "Kandy, Sri Lanka",
-          business_type: row.category || row.business_type || row.business_type || "", opportunity: row.opportunity || "", notes: row.notes || "", source: "other"
+          business_type: row.category || row.business_type || "", opportunity: row.opportunity || "", notes: row.notes || "", source: "other"
         });
         if (error?.code === "23505") skipped++; else if (error) skipped++; else added++;
       }
