@@ -1,7 +1,8 @@
 import { createClient } from "@supabase/supabase-js";
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+// Publishable keys are designed for browser use. Row Level Security protects user data.
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || "https://ylvklbyxybcuclnilxph.supabase.co";
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || "sb_publishable_RxaBdHNI_keXe4WWXHe3OA_4EgahQ8C";
 
 export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey);
 
