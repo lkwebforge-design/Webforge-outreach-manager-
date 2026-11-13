@@ -7,14 +7,14 @@ import {
 } from "lucide-react";
 import { isSupabaseConfigured, supabase } from "./lib/supabase";
 
-const STATUSES = ["new", "drafted", "contacted", "interested", "client", "not_interested", "do_not_contact"];
+const STATUSES = ["new", "researched", "draft_ready", "contacted", "replied", "interested", "client", "not_interested", "do_not_contact"];
 const STATUS_LABELS = {
-  new: "New", drafted: "Draft ready", contacted: "Contacted", interested: "Interested",
+  new: "New", researched: "Researched", draft_ready: "Draft ready", contacted: "Contacted", replied: "Replied", interested: "Interested",
   client: "Client", not_interested: "Not interested", do_not_contact: "Do not contact"
 };
 const emptyLead = {
-  business_name: "", instagram_handle: "", instagram_url: "", website_url: "",
-  location: "Kandy, Sri Lanka", category: "", opportunity: "", notes: ""
+  business_name: "", instagram_handle: "", instagram_profile_url: "", website_url: "",
+  location: "Kandy, Sri Lanka", business_type: "", opportunity: "", notes: ""
 };
 
 function cleanHandle(value = "") {
@@ -22,7 +22,7 @@ function cleanHandle(value = "") {
     .replace(/^@/, "").split(/[/?#]/)[0].toLowerCase();
 }
 function profileUrl(lead) {
-  return lead.instagram_url?.trim() || (cleanHandle(lead.instagram_handle)
+  return lead.instagram_profile_url?.trim() || (cleanHandle(lead.instagram_handle)
     ? `https://www.instagram.com/${cleanHandle(lead.instagram_handle)}/` : "https://www.instagram.com/");
 }
 function makeDraft(lead) {
@@ -117,23 +117,31 @@ export default function App() {
   async function loadLeads() {
     if (!session?.user) return;
     const { data, error } = await supabase.from("outreach_leads").select("*").order("created_at", { ascending: false });
-    if (error) notify(error.message); else setLeads(data || []);
+    if (error) { notify(error.message); return; }
+    const { data: drafts, error: draftError } = await supabase.from("outreach_dm_drafts").select("*").order("created_at", { ascending: false });
+    if (draftError) { notify(draftError.message); return; }
+    const latest = new Map();
+    for (const item of drafts || []) if (!latest.has(item.lead_id)) latest.set(item.lead_id, item);
+    setLeads((data || []).map(lead => {
+      const item = latest.get(lead.id);
+      return { ...lead, dm_draft: item?.message_text || "", latestDraftId: item?.id || null, draftStatus: item?.status || null };
+    }));
   }
   useEffect(() => { loadLeads(); }, [session?.user?.id]);
   function notify(message) { setToast(message); window.setTimeout(() => setToast(""), 3200); }
 
   const filtered = useMemo(() => leads.filter(lead => {
     const q = query.toLowerCase();
-    const matches = !q || [lead.business_name, lead.instagram_handle, lead.location, lead.category].some(v => (v || "").toLowerCase().includes(q));
+    const matches = !q || [lead.business_name, lead.instagram_handle, lead.location, lead.business_type].some(v => (v || "").toLowerCase().includes(q));
     const status = statusFilter === "all" || lead.status === statusFilter;
-    const section = view === "queue" ? ["drafted", "new"].includes(lead.status)
-      : view === "followups" ? ["contacted", "interested"].includes(lead.status) : true;
+    const section = view === "queue" ? (lead.status === "draft_ready" || lead.status === "new")
+      : view === "followups" ? ["contacted", "replied", "interested"].includes(lead.status) : true;
     return matches && status && section;
   }), [leads, query, statusFilter, view]);
 
   const stats = useMemo(() => ({
     total: leads.length, new: leads.filter(l => l.status === "new").length,
-    queue: leads.filter(l => l.status === "drafted").length,
+    queue: leads.filter(l => l.status === "draft_ready").length,
     contacted: leads.filter(l => ["contacted", "interested"].includes(l.status)).length,
     clients: leads.filter(l => l.status === "client").length
   }), [leads]);
@@ -147,10 +155,10 @@ export default function App() {
     const payload = {
       business_name: form.business_name.trim(),
       instagram_handle: handle,
-      instagram_url: form.instagram_url.trim() || `https://www.instagram.com/${handle}/`,
+      instagram_profile_url: form.instagram_profile_url.trim() || `https://www.instagram.com/${handle}/`,
       website_url: form.website_url?.trim() || null,
       location: form.location?.trim() || null,
-      category: form.category?.trim() || null,
+      category: form.business_type?.trim() || null,
       opportunity: form.opportunity?.trim() || null,
       notes: form.notes?.trim() || null
     };
@@ -189,9 +197,9 @@ export default function App() {
         if (!handle || !(row.business_name || row.name)) { skipped++; continue; }
         const { error } = await supabase.from("outreach_leads").insert({
           user_id: session.user.id, business_name: row.business_name || row.name,
-          instagram_handle: handle, instagram_url: row.instagram_url || `https://www.instagram.com/${handle}/`,
+          instagram_handle: handle, instagram_profile_url: row.instagram_url || row.instagram_profile_url || `https://www.instagram.com/${handle}/`,
           website_url: row.website_url || row.website || "", location: row.location || "Kandy, Sri Lanka",
-          category: row.category || "", opportunity: row.opportunity || "", notes: row.notes || "", source: "csv_import"
+          business_type: row.category || row.business_type || row.business_type || "", opportunity: row.opportunity || "", notes: row.notes || "", source: "other"
         });
         if (error?.code === "23505") skipped++; else if (error) skipped++; else added++;
       }
@@ -201,10 +209,25 @@ export default function App() {
     setBusyImport(false);
   }
   function exportCsv() {
-    const headers = ["business_name","instagram_handle","instagram_url","website_url","location","category","opportunity","notes","dm_draft","status"];
+    const headers = ["business_name","instagram_handle","instagram_profile_url","website_url","location","business_type","opportunity","notes","dm_draft","status"];
     const csv = [headers.join(","), ...leads.map(l => headers.map(h => csvCell(l[h])).join(","))].join("\n");
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
     const a = document.createElement("a"); a.href = url; a.download = "webforge-leads.csv"; a.click(); URL.revokeObjectURL(url);
+  }
+  async function approveDraft(lead) {
+    if (!lead.latestDraftId) { notify("Save the draft before approving it."); return; }
+    const { error } = await supabase.from("outreach_dm_drafts").update({ status: "approved", approved_at: new Date().toISOString() }).eq("id", lead.latestDraftId);
+    if (error) notify(error.message);
+    else { await supabase.from("outreach_activity").insert({ user_id: session.user.id, lead_id: lead.id, event_type: "dm_approved", details: "Draft approved for manual sending" }); notify("Draft approved."); await loadLeads(); }
+  }
+  async function markSent(lead) {
+    if (!lead.latestDraftId || lead.draftStatus !== "approved") { notify("Approve the saved draft before marking it sent."); return; }
+    const now = new Date().toISOString();
+    const { error } = await supabase.from("outreach_dm_drafts").update({ status: "sent", sent_at: now, sent_method: "manual_instagram" }).eq("id", lead.latestDraftId);
+    if (error) { notify(error.message); return; }
+    await supabase.from("outreach_leads").update({ status: "contacted", last_contacted_at: now }).eq("id", lead.id);
+    await supabase.from("outreach_activity").insert({ user_id: session.user.id, lead_id: lead.id, event_type: "dm_sent_manually", details: "User marked manually sent" });
+    notify("Marked as manually sent."); setSelected(null); await loadLeads();
   }
   async function copyDraft(text) { await navigator.clipboard.writeText(text); notify("DM copied. Review it before sending."); }
 
@@ -252,8 +275,8 @@ export default function App() {
     {selected && <div className="overlay" onMouseDown={e => e.target === e.currentTarget && setSelected(null)}><div className="detail-modal"><div className="modal-head"><div><div className="eyebrow">PROSPECT DETAILS</div><h2>{selected.business_name}</h2><p className="muted">@{selected.instagram_handle} · {selected.location || "Location not set"}</p></div><button className="icon-btn" onClick={() => setSelected(null)}><X/></button></div>
       <div className="detail-links"><a href={profileUrl(selected)} target="_blank" rel="noreferrer"><Instagram size={16}/> Open Instagram <ExternalLink size={13}/></a>{selected.website_url && <a href={selected.website_url} target="_blank" rel="noreferrer"><Globe2 size={16}/> Website <ExternalLink size={13}/></a>}</div>
       <label className="draft-label">PERSONALIZED MESSAGE DRAFT<textarea className="draft-area" value={draft} onChange={e => setDraft(e.target.value)} rows={9}/></label>
-      <div className="draft-actions"><button className="btn secondary" onClick={() => setDraft(makeDraft(selected))}><Sparkles size={15}/> Regenerate draft</button><button className="btn secondary" onClick={() => saveDraft(selected,draft)}><Check size={15}/> Save draft</button><button className="btn primary" onClick={() => copyDraft(draft)}><Clipboard size={15}/> Copy message</button></div>
-      <div className="send-warning"><MessageSquareText size={16}/><span>Review the message, open Instagram, and send it yourself. This tool does not auto-send cold DMs.</span></div>
+      <div className="draft-actions"><button className="btn secondary" onClick={() => setDraft(makeDraft(selected))}><Sparkles size={15}/> Regenerate draft</button><button className="btn secondary" onClick={() => saveDraft(selected,draft)}><Check size={15}/> Save draft</button><button className="btn secondary" onClick={() => approveDraft(selected)} disabled={!selected.latestDraftId || selected.draftStatus === "approved"}>Approve</button><button className="btn primary" onClick={() => copyDraft(draft)}><Clipboard size={15}/> Copy message</button></div>
+      <div className="send-warning"><MessageSquareText size={16}/><span>Review the message, open Instagram, and send it yourself. This tool does not auto-send cold DMs.</span></div><div className="draft-actions"><button className="btn secondary" disabled={selected.draftStatus !== "approved"} onClick={() => markSent(selected)}>Mark manually sent</button></div>
       <div className="detail-bottom"><label>Status<select value={selected.status} onChange={e => { updateStatus(selected,e.target.value); setSelected({...selected,status:e.target.value}); }} >{STATUSES.map(s => <option key={s} value={s}>{STATUS_LABELS[s]}</option>)}</select></label><button className="btn danger" onClick={() => deleteLead(selected)}><Trash2 size={15}/> Delete lead</button></div>
       <button className="text-btn edit-link" onClick={() => { setSelected(null); openEdit(selected); }}>Edit prospect details</button>
     </div></div>}
