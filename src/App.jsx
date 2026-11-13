@@ -144,7 +144,16 @@ export default function App() {
     e.preventDefault(); setSaving(true);
     const handle = cleanHandle(form.instagram_handle);
     if (!form.business_name.trim() || !handle) { notify("Business name and Instagram handle are required."); setSaving(false); return; }
-    const payload = { ...form, instagram_handle: handle, instagram_url: form.instagram_url.trim() || `https://www.instagram.com/${handle}/` };
+    const payload = {
+      business_name: form.business_name.trim(),
+      instagram_handle: handle,
+      instagram_url: form.instagram_url.trim() || `https://www.instagram.com/${handle}/`,
+      website_url: form.website_url?.trim() || null,
+      location: form.location?.trim() || null,
+      category: form.category?.trim() || null,
+      opportunity: form.opportunity?.trim() || null,
+      notes: form.notes?.trim() || null
+    };
     let result;
     if (editing) result = await supabase.from("outreach_leads").update(payload).eq("id", editing.id).select().single();
     else result = await supabase.from("outreach_leads").insert({ ...payload, user_id: session.user.id }).select().single();
