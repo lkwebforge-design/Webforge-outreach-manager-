@@ -15,7 +15,7 @@ A private-workflow CRM for WebForge Signature: lead imports, duplicate protectio
 5. Run `npm run dev`.
 
 ## Database
-The `outreach_leads` and `outreach_activity` tables are provisioned in the WebForge AI Supabase project. Both tables have Row Level Security enabled and are scoped to the signed-in user.
+The `outreach_leads`, `outreach_dm_drafts`, and `outreach_activity` tables are provisioned in the dedicated WebForge Outreach Manager Supabase project. Row Level Security is enabled and policies scope records to the signed-in user.
 
 ## Outreach safety
 This app prepares and tracks messages. It does not automate unsolicited Instagram DMs, scrape private data, or bypass Meta restrictions. A user reviews each draft, opens the public Instagram profile, sends manually, and then marks the lead contacted.
