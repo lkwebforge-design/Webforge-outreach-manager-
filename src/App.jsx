@@ -64,7 +64,7 @@ function AuthScreen() {
     e.preventDefault(); setBusy(true); setError("");
     const action = mode === "signin"
       ? supabase.auth.signInWithPassword({ email, password })
-      : supabase.auth.signUp({ email, password });
+      : supabase.auth.signUp({ email, password, options: { emailRedirectTo: "https://lkwebforge-design.github.io/Webforge-outreach-manager-/" } });
     const { error: authError } = await action;
     setBusy(false);
     if (authError) setError(authError.message);
