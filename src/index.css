@@ -19,3 +19,6 @@
 .bulk-item-actions{display:flex;gap:7px;flex-wrap:wrap;justify-content:flex-end;flex-shrink:0}.bulk-item-actions .btn{font-size:10px;padding:8px 10px}
 @media(max-width:1100px){.stats-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:760px){.stats-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.bulk-bar{align-items:flex-start;flex-direction:column}.bulk-bar .btn{width:100%}.bulk-item{align-items:flex-start;flex-direction:column}.bulk-item-actions{width:100%}.bulk-item-actions .btn{flex:1}}
+
+/* Approval state badges in the prospects table */
+.approval-pill{display:inline-flex;align-items:center;padding:5px 9px;border-radius:20px;font-size:9px;font-weight:700;white-space:nowrap}.approval-pill.is-approved{background:#243a25;color:#bdf09f;border:1px solid #426744}.approval-pill.is-pending{background:#302b20;color:#e6d59a;border:1px solid #51452b}
