@@ -106,6 +106,7 @@ export default function App() {
   const [selected, setSelected] = useState(null);
   const [draft, setDraft] = useState("");
   const [busyImport, setBusyImport] = useState(false);
+  const [showBulkQueue, setShowBulkQueue] = useState(false);
 
   useEffect(() => {
     if (!supabase) { setReady(true); return; }
@@ -134,16 +135,18 @@ export default function App() {
     const q = query.toLowerCase();
     const matches = !q || [lead.business_name, lead.instagram_handle, lead.location, lead.business_type].some(v => (v || "").toLowerCase().includes(q));
     const status = statusFilter === "all" || lead.status === statusFilter;
-    const section = view === "queue" ? (lead.status === "draft_ready" || lead.status === "new")
+    const section = view === "queue" ? lead.draftStatus === "draft"
+      : view === "approved" ? lead.draftStatus === "approved"
       : view === "followups" ? ["contacted", "replied", "interested"].includes(lead.status) : true;
     return matches && status && section;
   }), [leads, query, statusFilter, view]);
 
   const stats = useMemo(() => ({
     total: leads.length, new: leads.filter(l => l.status === "new").length,
-    queue: leads.filter(l => l.status === "draft_ready").length,
-    contacted: leads.filter(l => ["contacted", "interested"].includes(l.status)).length,
-    clients: leads.filter(l => l.status === "client").length
+    queue: leads.filter(l => l.draftStatus === "draft").length,
+    contacted: leads.filter(l => ["contacted", "replied", "interested"].includes(l.status)).length,
+    clients: leads.filter(l => l.status === "client").length,
+    approved: leads.filter(l => l.draftStatus === "approved").length
   }), [leads]);
 
   function openAdd() { setEditing(null); setForm(emptyLead); setShowAdd(true); }
@@ -250,6 +253,7 @@ export default function App() {
       <div className="side-label">WORKSPACE</div>
       <button className={view === "all" ? "nav-item active" : "nav-item"} onClick={() => setView("all")}><LayoutDashboard size={17}/> Overview</button>
       <button className={view === "queue" ? "nav-item active" : "nav-item"} onClick={() => setView("queue")}><Send size={17}/> Draft queue <span>{stats.queue}</span></button>
+      <button className={view === "approved" ? "nav-item active" : "nav-item"} onClick={() => setView("approved")}><Check size={17}/> Approved prospects <span>{stats.approved}</span></button>
       <button className={view === "followups" ? "nav-item active" : "nav-item"} onClick={() => setView("followups")}><MessageSquareText size={17}/> Follow-ups</button>
       <div className="sidebar-bottom">
         <div className="account"><div className="avatar">{session.user.email?.[0]?.toUpperCase() || "W"}</div><div><strong>WebForge</strong><small>{session.user.email}</small></div></div>
@@ -258,25 +262,28 @@ export default function App() {
     </aside>
 
     <main className="main">
-      <header className="topbar"><div className="crumb">WebForge Signature <span>/</span> {view === "all" ? "Overview" : view === "queue" ? "Draft queue" : "Follow-ups"}</div><div className="top-actions"><span className="secure"><span/> Private workspace</span><button className="btn primary" onClick={openAdd}><CirclePlus size={16}/> Add lead</button></div></header>
-      <section className="page-head"><div><div className="eyebrow">YOUR SALES PIPELINE</div><h1>{view === "all" ? "Outreach overview" : view === "queue" ? "Ready for review" : "Keep conversations moving."}</h1><p className="muted">{view === "queue" ? "Review each personalized message, then send it manually from Instagram." : view === "followups" ? "Track prospects who have already been contacted or shown interest." : "A clear view of every prospect, every draft, and every opportunity."}</p></div><div className="head-actions"><label className="btn secondary import-btn"><Upload size={16}/>{busyImport ? "Importing…" : "Import CSV"}<input type="file" accept=".csv,text/csv" disabled={busyImport} onChange={e => e.target.files?.[0] && importCsv(e.target.files[0])}/></label><button className="btn secondary" onClick={exportCsv}><Download size={16}/> Export</button></div></section>
+      <header className="topbar"><div className="crumb">WebForge Signature <span>/</span> {view === "all" ? "Overview" : view === "queue" ? "Draft queue" : view === "approved" ? "Approved prospects" : "Follow-ups"}</div><div className="top-actions"><span className="secure"><span/> Private workspace</span><button className="btn primary" onClick={openAdd}><CirclePlus size={16}/> Add lead</button></div></header>
+      <section className="page-head"><div><div className="eyebrow">YOUR SALES PIPELINE</div><h1>{view === "all" ? "Outreach overview" : view === "queue" ? "Ready for review" : view === "approved" ? "Approved prospects" : "Keep conversations moving."}</h1><p className="muted">{view === "queue" ? "Review saved drafts and approve the messages you want to use." : view === "approved" ? "These prospects have an approved message and are ready for your manual outreach batch." : view === "followups" ? "Track prospects who have already been contacted or shown interest." : "A clear view of every prospect, every draft, and every opportunity."}</p></div><div className="head-actions"><label className="btn secondary import-btn"><Upload size={16}/>{busyImport ? "Importing…" : "Import CSV"}<input type="file" accept=".csv,text/csv" disabled={busyImport} onChange={e => e.target.files?.[0] && importCsv(e.target.files[0])}/></label><button className="btn secondary" onClick={exportCsv}><Download size={16}/> Export</button></div></section>
 
       <section className="stats-grid">
-        <Stat icon={<Users/>} label="Total prospects" value={stats.total} note="All saved leads"/>
-        <Stat icon={<Sparkles/>} label="New leads" value={stats.new} note="Not contacted yet"/>
-        <Stat icon={<Send/>} label="Draft queue" value={stats.queue} note="Waiting for your review"/>
-        <Stat icon={<Activity/>} label="In conversation" value={stats.contacted} note="Contacted or interested"/>
-        <Stat icon={<Target/>} label="Clients" value={stats.clients} note="Won opportunities"/>
+        <Stat icon={<Users/>} label="Total prospects" value={stats.total} note="All saved leads" active={view === "all"} onClick={() => {setView("all");setStatusFilter("all");}}/>
+        <Stat icon={<Sparkles/>} label="New leads" value={stats.new} note="Not contacted yet" active={false} onClick={() => {setView("all");setStatusFilter("new");}}/>
+        <Stat icon={<Send/>} label="Draft queue" value={stats.queue} note="Awaiting approval" active={view === "queue"} onClick={() => {setView("queue");setStatusFilter("all");}}/>
+        <Stat icon={<Check/>} label="Approved prospects" value={stats.approved} note="Approved for outreach" active={view === "approved"} onClick={() => {setView("approved");setStatusFilter("all");}}/>
+        <Stat icon={<Activity/>} label="In conversation" value={stats.contacted} note="Contacted or interested" active={view === "followups"} onClick={() => {setView("followups");setStatusFilter("all");}}/>
+        <Stat icon={<Target/>} label="Clients" value={stats.clients} note="Won opportunities" active={false} onClick={() => {setView("all");setStatusFilter("client");}}/>
       </section>
 
       <section className="panel">
-        <div className="panel-head"><div><h2>{view === "queue" ? "Message review queue" : view === "followups" ? "Follow-up pipeline" : "All prospects"}</h2><p className="muted">{filtered.length} records · duplicate Instagram handles are blocked</p></div><div className="filters"><div className="searchbox"><Search size={16}/><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search business or handle"/></div><div className="select-wrap"><Filter size={15}/><select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}><option value="all">All statuses</option>{STATUSES.map(s => <option key={s} value={s}>{STATUS_LABELS[s]}</option>)}</select><ChevronDown size={14}/></div></div></div>
-        {filtered.length === 0 ? <div className="empty"><div className="empty-icon"><Instagram/></div><h3>No prospects here yet</h3><p className="muted">Add a lead manually or import your verified Instagram prospect list.</p><button className="btn primary" onClick={openAdd}><CirclePlus size={16}/> Add your first lead</button></div> :
+        <div className="panel-head"><div><h2>{view === "queue" ? "Message review queue" : view === "approved" ? "Approved prospects" : view === "followups" ? "Follow-up pipeline" : "All prospects"}</h2><p className="muted">{filtered.length} records · duplicate Instagram handles are blocked</p></div><div className="filters"><div className="searchbox"><Search size={16}/><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search business or handle"/></div><div className="select-wrap"><Filter size={15}/><select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}><option value="all">All statuses</option>{STATUSES.map(s => <option key={s} value={s}>{STATUS_LABELS[s]}</option>)}</select><ChevronDown size={14}/></div></div></div>
+        {filtered.length === 0 ? <div className="empty"><div className="empty-icon"><Instagram/></div><h3>{view === "approved" ? "No approved prospects yet" : "No prospects here yet"}</h3><p className="muted">{view === "approved" ? "Approve a saved message draft to add a business to this list." : "Add a lead manually or import your verified Instagram prospect list."}</p>{view !== "approved" && <button className="btn primary" onClick={openAdd}><CirclePlus size={16}/> Add your first lead</button>}</div> :
           <div className="table-wrap"><table><thead><tr><th>BUSINESS</th><th>LOCATION</th><th>OPPORTUNITY</th><th>STATUS</th><th>ADDED</th><th></th></tr></thead><tbody>{filtered.map(lead => <tr key={lead.id} onClick={() => { setSelected(lead); setDraft(lead.dm_draft || makeDraft(lead)); }}><td><div className="business-cell"><div className="ig-avatar"><Instagram size={16}/></div><div><strong>{lead.business_name}</strong><small>@{lead.instagram_handle}</small></div></div></td><td>{lead.location || "—"}</td><td className="opportunity">{lead.opportunity || lead.business_type || "Needs review"}</td><td><span className={`status status-${lead.status}`}>{STATUS_LABELS[lead.status]}</span></td><td>{new Date(lead.created_at).toLocaleDateString()}</td><td><button className="icon-btn" onClick={e => { e.stopPropagation(); setSelected(lead); setDraft(lead.dm_draft || makeDraft(lead)); }}><ArrowUpRight size={17}/></button></td></tr>)}</tbody></table></div>}
       </section>
+      {view === "approved" && filtered.length > 0 && <div className="bulk-bar"><div><strong>{filtered.length} approved prospect{filtered.length === 1 ? "" : "s"}</strong><small>Messages are prepared for manual sending. Nothing is sent automatically.</small></div><button className="btn primary" onClick={() => setShowBulkQueue(true)}><Send size={15}/> Start bulk-send queue</button></div>}
       <footer className="footer-note"><span><Check size={14}/> Duplicate protection active</span><span>Manual review before every Instagram send · WebForge Signature</span></footer>
     </main>
 
+    {showBulkQueue && <div className="overlay" onMouseDown={e => e.target === e.currentTarget && setShowBulkQueue(false)}><div className="detail-modal bulk-modal"><div className="modal-head"><div><div className="eyebrow">APPROVED OUTREACH BATCH</div><h2>Send approved messages</h2><p className="muted">Copy each message, send it in Instagram, then mark it sent here. This queue will never auto-send or mark a message sent by itself.</p></div><button className="icon-btn" onClick={() => setShowBulkQueue(false)}><X/></button></div><div className="bulk-list">{leads.filter(l => l.draftStatus === "approved").map(lead => <div className="bulk-item" key={lead.id}><div><strong>{lead.business_name}</strong><small>@{lead.instagram_handle || "Instagram handle missing"}</small><p>{(lead.dm_draft || makeDraft(lead)).slice(0,150)}…</p></div><div className="bulk-item-actions"><button className="btn secondary" onClick={() => {copyDraft(lead.dm_draft || makeDraft(lead)); window.open(profileUrl(lead), "_blank", "noopener,noreferrer");}} disabled={!lead.instagram_handle}><Clipboard size={14}/> Copy + open</button><button className="btn primary" onClick={() => markSent(lead)}>Mark sent</button></div></div>)}</div><div className="send-warning"><MessageSquareText size={16}/><span>“Copy + open” prepares one message at a time. You must send it yourself in Instagram before choosing “Mark sent”. Automatic Instagram cold-DM sending is not connected.</span></div></div></div>}
     {showAdd && <div className="overlay" onMouseDown={e => e.target === e.currentTarget && setShowAdd(false)}><form className="modal" onSubmit={saveLead}><div className="modal-head"><div><div className="eyebrow">{editing ? "EDIT PROSPECT" : "NEW PROSPECT"}</div><h2>{editing ? "Update lead" : "Add a business lead"}</h2></div><button type="button" className="icon-btn" onClick={() => setShowAdd(false)}><X/></button></div>
       <div className="form-grid"><label>Business name *<input required value={form.business_name} onChange={e => setForm({...form,business_name:e.target.value})} placeholder="e.g. Cafe Example"/></label><label>Instagram handle *<input required value={form.instagram_handle} onChange={e => setForm({...form,instagram_handle:e.target.value})} placeholder="@businessname"/></label><label>Instagram profile URL<input value={form.instagram_profile_url} onChange={e => setForm({...form,instagram_profile_url:e.target.value})} placeholder="https://instagram.com/…"/></label><label>Website URL<input value={form.website_url} onChange={e => setForm({...form,website_url:e.target.value})} placeholder="https://… or leave blank"/></label><label>Location<input value={form.location} onChange={e => setForm({...form,location:e.target.value})} placeholder="Kandy, Sri Lanka"/></label><label>Business category<input value={form.business_type} onChange={e => setForm({...form,business_type:e.target.value})} placeholder="Cafe, salon, retail…"/></label><label className="wide">Opportunity / specific observation<textarea value={form.opportunity} onChange={e => setForm({...form,opportunity:e.target.value})} placeholder="What could WebForge improve for this business?"/></label><label className="wide">Notes<textarea value={form.notes} onChange={e => setForm({...form,notes:e.target.value})} placeholder="Public details, contact context, next steps…"/></label></div>
       <div className="modal-actions"><button type="button" className="btn secondary" onClick={() => setShowAdd(false)}>Cancel</button><button className="btn primary" disabled={saving}>{saving ? "Saving…" : editing ? "Save changes" : "Save prospect"}</button></div></form></div>}
@@ -293,6 +300,6 @@ export default function App() {
   </div>;
 }
 
-function Stat({ icon, label, value, note }) {
-  return <div className="stat-card"><div className="stat-top"><span className="stat-icon">{icon}</span><span className="stat-label">{label}</span></div><div className="stat-value">{value}</div><div className="stat-note">{note}</div></div>;
+function Stat({ icon, label, value, note, onClick, active }) {
+  return <button type="button" className={active ? "stat-card stat-card-active" : "stat-card"} onClick={onClick}><div className="stat-top"><span className="stat-icon">{icon}</span><span className="stat-label">{label}</span></div><div className="stat-value">{value}</div><div className="stat-note">{note}</div></button>;
 }
