@@ -17,18 +17,22 @@ const emptyLead = {
   location: "Kandy, Sri Lanka", business_type: "", opportunity: "", notes: ""
 };
 
+function safeText(value) { return typeof value === "string" ? value : value == null ? "" : String(value); }
 function cleanHandle(value = "") {
-  return value.trim().replace(/^https?:\/\/(www\.)?instagram\.com\//i, "")
+  return safeText(value).trim().replace(/^https?:\/\/(www\.)?instagram\.com\//i, "")
     .replace(/^@/, "").split(/[/?#]/)[0].toLowerCase();
 }
 function profileUrl(lead) {
-  return lead.instagram_profile_url?.trim() || (cleanHandle(lead.instagram_handle)
-    ? `https://www.instagram.com/${cleanHandle(lead.instagram_handle)}/` : "https://www.instagram.com/");
+  const savedUrl = safeText(lead?.instagram_profile_url).trim();
+  if (/^https?:\/\//i.test(savedUrl)) return savedUrl;
+  const handle = cleanHandle(lead?.instagram_handle);
+  return handle ? `https://www.instagram.com/${handle}/` : "https://www.instagram.com/";
 }
-function makeDraft(lead) {
-  const name = lead.business_name?.trim() || "there";
-  const detail = lead.opportunity?.trim()
-    ? ` I noticed ${lead.opportunity.trim().replace(/[.!?]+$/, "")}.`
+function makeDraft(lead = {}) {
+  const name = safeText(lead.business_name).trim() || "there";
+  const opportunity = safeText(lead.opportunity).trim();
+  const detail = opportunity
+    ? ` I noticed ${opportunity.replace(/[.!?]+$/, "")}.`
     : " I came across your business and wanted to reach out.";
   return `Hi ${name}! 👋 I'm reaching out from WebForge Signature, a Sri Lankan web design team.${detail} We build modern websites that help businesses present their services clearly and make it easier for customers to contact them. Would you be open to seeing a few ideas for your business?\n\nhttps://lkwebforge-design.github.io/WEBFORGE-SIGNATURE/`;
 }
@@ -314,7 +318,7 @@ export default function App() {
       <section className="panel">
         <div className="panel-head"><div><h2>{view === "queue" ? "Message review queue" : view === "approved" ? "Approved prospects" : view === "followups" ? "Follow-up pipeline" : "All prospects"}</h2><p className="muted">{filtered.length} records · duplicate Instagram handles are blocked</p></div><div className="filters"><div className="searchbox"><Search size={16}/><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search business or handle"/></div><div className="select-wrap"><Filter size={15}/><select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}><option value="all">All statuses</option>{STATUSES.map(s => <option key={s} value={s}>{STATUS_LABELS[s]}</option>)}</select><ChevronDown size={14}/></div></div>{view === "all" && <button className="btn primary" onClick={approveAllProspects} disabled={saving || !leads.some(l => l.latestDraftId && l.draftStatus === "draft")}><Check size={15}/>{saving ? "Approving…" : "Approve all prospects"}</button>}</div>
         {filtered.length === 0 ? <div className="empty"><div className="empty-icon"><Instagram/></div><h3>{view === "approved" ? "No approved prospects yet" : "No prospects here yet"}</h3><p className="muted">{view === "approved" ? "Approve a saved message draft to add a business to this list." : "Add a lead manually or import your verified Instagram prospect list."}</p>{view !== "approved" && <button className="btn primary" onClick={openAdd}><CirclePlus size={16}/> Add your first lead</button>}</div> :
-          <div className="table-wrap"><table><thead><tr><th>BUSINESS</th><th>LOCATION</th><th>OPPORTUNITY</th><th>STATUS</th><th>APPROVAL</th><th>ADDED</th><th></th></tr></thead><tbody>{filtered.map(lead => <tr key={lead.id} onClick={() => { setSelected(lead); setDraft(lead.dm_draft || makeDraft(lead)); }}><td><div className="business-cell"><div className="ig-avatar"><Instagram size={16}/></div><div><strong>{lead.business_name}</strong><small>@{lead.instagram_handle}</small></div></div></td><td>{lead.location || "—"}</td><td className="opportunity">{lead.opportunity || lead.business_type || "Needs review"}</td><td><span className={`status status-${lead.status}`}>{STATUS_LABELS[lead.status]}</span></td><td><span className={`approval-pill ${["approved", "sent"].includes(lead.draftStatus) ? "is-approved" : "is-pending"}`}>{["approved", "sent"].includes(lead.draftStatus) ? "Approved" : "Not approved"}</span></td><td>{new Date(lead.created_at).toLocaleDateString()}</td><td><button className="icon-btn" onClick={e => { e.stopPropagation(); setSelected(lead); setDraft(lead.dm_draft || makeDraft(lead)); }}><ArrowUpRight size={17}/></button></td></tr>)}</tbody></table></div>}
+          <div className="table-wrap"><table><thead><tr><th>BUSINESS</th><th>LOCATION</th><th>OPPORTUNITY</th><th>STATUS</th><th>APPROVAL</th><th>ADDED</th><th></th></tr></thead><tbody>{filtered.map(lead => <tr key={lead.id} onClick={() => { setSelected(lead); setDraft(safeText(lead.dm_draft) || makeDraft(lead)); }}><td><div className="business-cell"><div className="ig-avatar"><Instagram size={16}/></div><div><strong>{lead.business_name}</strong><small>@{lead.instagram_handle}</small></div></div></td><td>{lead.location || "—"}</td><td className="opportunity">{lead.opportunity || lead.business_type || "Needs review"}</td><td><span className={`status status-${lead.status}`}>{STATUS_LABELS[lead.status]}</span></td><td><span className={`approval-pill ${["approved", "sent"].includes(lead.draftStatus) ? "is-approved" : "is-pending"}`}>{["approved", "sent"].includes(lead.draftStatus) ? "Approved" : "Not approved"}</span></td><td>{new Date(lead.created_at).toLocaleDateString()}</td><td><button className="icon-btn" onClick={e => { e.stopPropagation(); setSelected(lead); setDraft(safeText(lead.dm_draft) || makeDraft(lead)); }}><ArrowUpRight size={17}/></button></td></tr>)}</tbody></table></div>}
       </section>
       {view === "approved" && filtered.length > 0 && <div className="bulk-bar"><div><strong>{filtered.length} approved prospect{filtered.length === 1 ? "" : "s"}</strong><small>Messages are prepared for manual sending. Nothing is sent automatically.</small></div><button className="btn primary" onClick={() => setShowBulkQueue(true)}><Send size={15}/> Start bulk-send queue</button></div>}
       <footer className="footer-note"><span><Check size={14}/> Duplicate protection active</span><span>Manual review before every Instagram send · WebForge Signature</span></footer>
