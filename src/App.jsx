@@ -51,7 +51,8 @@ function contactOptions(lead) {
   ];
 }
 function contactTarget(lead) {
-  return contactOptions(lead).find(option => option.url) || null;
+  const options = contactOptions(lead);
+  return options.find(option => option.url && !option.fallback) || options.find(option => option.url) || null;
 }
 function normalizeLead(lead = {}, draft = null) {
   const normalized = { ...lead };
