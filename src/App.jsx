@@ -26,11 +26,26 @@ function profileUrl(lead) {
   const savedUrl = safeText(lead?.instagram_profile_url).trim();
   if (/^https?:\/\//i.test(savedUrl)) return savedUrl;
   const handle = cleanHandle(lead?.instagram_handle);
-  return handle ? `https://www.instagram.com/${handle}/` : "https://www.instagram.com/";
+  return handle ? `https://www.instagram.com/${handle}/` : "";
+}
+function whatsappUrl(lead) {
+  const digits = safeText(lead?.phone).replace(/[^0-9]/g, "");
+  return digits.length >= 8 ? `https://wa.me/${digits}` : "";
+}
+function contactTarget(lead) {
+  const instagram = profileUrl(lead);
+  if (instagram) return { label: "Open Instagram", url: instagram, kind: "instagram" };
+  const whatsapp = whatsappUrl(lead);
+  if (whatsapp) return { label: "Open WhatsApp", url: whatsapp, kind: "whatsapp" };
+  const email = safeText(lead?.email).trim();
+  if (email) return { label: "Email business", url: `mailto:${email}`, kind: "email" };
+  const website = safeText(lead?.website_url).trim();
+  if (/^https?:\/\//i.test(website)) return { label: "Open website", url: website, kind: "website" };
+  return null;
 }
 function normalizeLead(lead = {}, draft = null) {
   const normalized = { ...lead };
-  for (const key of ["business_name", "instagram_handle", "instagram_profile_url", "website_url", "location", "business_type", "opportunity", "notes"]) {
+  for (const key of ["business_name", "instagram_handle", "instagram_profile_url", "website_url", "location", "business_type", "opportunity", "notes", "email", "phone", "contact_name"]) {
     normalized[key] = safeText(lead[key]).trim();
   }
   normalized.instagram_handle = cleanHandle(normalized.instagram_handle);
@@ -176,14 +191,16 @@ export default function App() {
     const handle = cleanHandle(form.instagram_handle);
     const instagramUrl = safeText(form.instagram_profile_url).trim() || (handle ? `https://www.instagram.com/${handle}/` : "");
     const websiteUrl = safeText(form.website_url).trim();
-    if (!businessName || !handle) { notify("Business name and a valid Instagram handle are required."); setSaving(false); return; }
-    if (!/^[a-z0-9._]{1,30}$/i.test(handle)) { notify("That Instagram handle doesn't look valid. Check it before saving."); setSaving(false); return; }
+    if (!businessName) { notify("Business name is required."); setSaving(false); return; }
+    if (handle && !/^[a-z0-9._]{1,30}$/i.test(handle)) { notify("That Instagram handle doesn't look valid. Check it before saving."); setSaving(false); return; }
     if (!validHttpUrl(instagramUrl) || !validHttpUrl(websiteUrl)) { notify("Website and Instagram links must be valid http or https URLs."); setSaving(false); return; }
     const payload = {
       business_name: businessName,
-      instagram_handle: handle,
-      instagram_profile_url: instagramUrl,
+      instagram_handle: handle || null,
+      instagram_profile_url: instagramUrl || null,
       website_url: websiteUrl || null,
+      phone: safeText(form.phone).trim() || null,
+      email: safeText(form.email).trim() || null,
       location: safeText(form.location).trim() || null,
       business_type: safeText(form.business_type).trim() || null,
       opportunity: safeText(form.opportunity).trim() || null,
@@ -230,11 +247,12 @@ export default function App() {
       let added = 0, skipped = 0;
       for (const row of rows) {
         const handle = cleanHandle(row.instagram_handle || row.instagram || row.handle);
-        if (!handle || !(row.business_name || row.name)) { skipped++; continue; }
+        if (!(row.business_name || row.name)) { skipped++; continue; }
         const { error } = await supabase.from("outreach_leads").insert({
           user_id: session.user.id, business_name: row.business_name || row.name,
-          instagram_handle: handle, instagram_profile_url: row.instagram_url || row.instagram_profile_url || `https://www.instagram.com/${handle}/`,
-          website_url: row.website_url || row.website || "", location: row.location || "Kandy, Sri Lanka",
+          instagram_handle: handle || null, instagram_profile_url: row.instagram_url || row.instagram_profile_url || (handle ? `https://www.instagram.com/${handle}/` : null),
+          website_url: row.website_url || row.website || "", email: row.email || null, phone: row.phone || row.whatsapp || null,
+          location: row.location || "Kandy, Sri Lanka",
           business_type: row.category || row.business_type || "", opportunity: row.opportunity || "", notes: row.notes || "", source: "other"
         });
         if (error?.code === "23505") skipped++; else if (error) skipped++; else added++;
@@ -344,13 +362,13 @@ export default function App() {
       <footer className="footer-note"><span><Check size={14}/> Duplicate protection active</span><span>Manual review before every Instagram send · WebForge Signature</span></footer>
     </main>
 
-    {showBulkQueue && <div className="overlay" onMouseDown={e => e.target === e.currentTarget && setShowBulkQueue(false)}><div className="detail-modal bulk-modal"><div className="modal-head"><div><div className="eyebrow">APPROVED OUTREACH BATCH</div><h2>Send approved messages</h2><p className="muted">Copy each message, send it in Instagram, then mark it sent here. This queue will never auto-send or mark a message sent by itself.</p></div><button className="icon-btn" onClick={() => setShowBulkQueue(false)}><X/></button></div><div className="bulk-list">{leads.filter(l => l.draftStatus === "approved").map(lead => <div className="bulk-item" key={lead.id}><div><strong>{lead.business_name}</strong><small>@{lead.instagram_handle || "Instagram handle missing"}</small><p>{(lead.dm_draft || makeDraft(lead)).slice(0,150)}…</p></div><div className="bulk-item-actions"><button className="btn secondary" onClick={() => {copyDraft(lead.dm_draft || makeDraft(lead)); window.open(profileUrl(lead), "_blank", "noopener,noreferrer");}} disabled={!lead.instagram_handle}><Clipboard size={14}/> Copy + open</button><button className="btn primary" onClick={() => markSent(lead)}>Mark sent</button></div></div>)}</div><div className="send-warning"><MessageSquareText size={16}/><span>“Copy + open” prepares one message at a time. You must send it yourself in Instagram before choosing “Mark sent”. Automatic Instagram cold-DM sending is not connected.</span></div></div></div>}
+    {showBulkQueue && <div className="overlay" onMouseDown={e => e.target === e.currentTarget && setShowBulkQueue(false)}><div className="detail-modal bulk-modal"><div className="modal-head"><div><div className="eyebrow">APPROVED OUTREACH BATCH</div><h2>Send approved messages</h2><p className="muted">Copy each message, send it in Instagram, then mark it sent here. This queue will never auto-send or mark a message sent by itself.</p></div><button className="icon-btn" onClick={() => setShowBulkQueue(false)}><X/></button></div><div className="bulk-list">{leads.filter(l => l.draftStatus === "approved").map(lead => <div className="bulk-item" key={lead.id}><div><strong>{lead.business_name}</strong><small>@{lead.instagram_handle || "Instagram handle missing"}</small><p>{(lead.dm_draft || makeDraft(lead)).slice(0,150)}…</p></div><div className="bulk-item-actions"><button className="btn secondary" onClick={() => {copyDraft(lead.dm_draft || makeDraft(lead)); const target = contactTarget(lead); if (target) window.open(target.url, "_blank", "noopener,noreferrer"); else notify("No Instagram, WhatsApp number, email, or website is saved for this prospect.");}}><Clipboard size={14}/> Copy + open contact</button><button className="btn primary" onClick={() => markSent(lead)}>Mark sent</button></div></div>)}</div><div className="send-warning"><MessageSquareText size={16}/><span>“Copy + open” prepares one message at a time. You must send it yourself in Instagram before choosing “Mark sent”. Automatic Instagram cold-DM sending is not connected.</span></div></div></div>}
     {showAdd && <div className="overlay" onMouseDown={e => e.target === e.currentTarget && setShowAdd(false)}><form className="modal" onSubmit={saveLead}><div className="modal-head"><div><div className="eyebrow">{editing ? "EDIT PROSPECT" : "NEW PROSPECT"}</div><h2>{editing ? "Update lead" : "Add a business lead"}</h2></div><button type="button" className="icon-btn" onClick={() => setShowAdd(false)}><X/></button></div>
-      <div className="form-grid"><label>Business name *<input required value={form.business_name} onChange={e => setForm({...form,business_name:e.target.value})} placeholder="e.g. Cafe Example"/></label><label>Instagram handle *<input required value={form.instagram_handle} onChange={e => setForm({...form,instagram_handle:e.target.value})} placeholder="@businessname"/></label><label>Instagram profile URL<input value={form.instagram_profile_url} onChange={e => setForm({...form,instagram_profile_url:e.target.value})} placeholder="https://instagram.com/…"/></label><label>Website URL<input value={form.website_url} onChange={e => setForm({...form,website_url:e.target.value})} placeholder="https://… or leave blank"/></label><label>Location<input value={form.location} onChange={e => setForm({...form,location:e.target.value})} placeholder="Kandy, Sri Lanka"/></label><label>Business category<input value={form.business_type} onChange={e => setForm({...form,business_type:e.target.value})} placeholder="Cafe, salon, retail…"/></label><label className="wide">Opportunity / specific observation<textarea value={form.opportunity} onChange={e => setForm({...form,opportunity:e.target.value})} placeholder="What could WebForge improve for this business?"/></label><label className="wide">Notes<textarea value={form.notes} onChange={e => setForm({...form,notes:e.target.value})} placeholder="Public details, contact context, next steps…"/></label></div>
+      <div className="form-grid"><label>Business name *<input required value={form.business_name} onChange={e => setForm({...form,business_name:e.target.value})} placeholder="e.g. Cafe Example"/></label><label>Instagram handle (optional)<input value={form.instagram_handle} onChange={e => setForm({...form,instagram_handle:e.target.value})} placeholder="@businessname or leave blank"/></label><label>Instagram profile URL<input value={form.instagram_profile_url} onChange={e => setForm({...form,instagram_profile_url:e.target.value})} placeholder="https://instagram.com/…"/></label><label>Website URL<input value={form.website_url} onChange={e => setForm({...form,website_url:e.target.value})} placeholder="https://… or leave blank"/></label><label>WhatsApp / phone<input value={form.phone || ""} onChange={e => setForm({...form,phone:e.target.value})} placeholder="+94… / +91…"/></label><label>Contact email<input type="email" value={form.email || ""} onChange={e => setForm({...form,email:e.target.value})} placeholder="hello@business.com"/></label><label>Location<input value={form.location} onChange={e => setForm({...form,location:e.target.value})} placeholder="Kandy, Sri Lanka"/></label><label>Business category<input value={form.business_type} onChange={e => setForm({...form,business_type:e.target.value})} placeholder="Cafe, salon, retail…"/></label><label className="wide">Opportunity / specific observation<textarea value={form.opportunity} onChange={e => setForm({...form,opportunity:e.target.value})} placeholder="What could WebForge improve for this business?"/></label><label className="wide">Notes<textarea value={form.notes} onChange={e => setForm({...form,notes:e.target.value})} placeholder="Public details, contact context, next steps…"/></label></div>
       <div className="modal-actions"><button type="button" className="btn secondary" onClick={() => setShowAdd(false)}>Cancel</button><button className="btn primary" disabled={saving}>{saving ? "Saving…" : editing ? "Save changes" : "Save prospect"}</button></div></form></div>}
 
-    {selected && <div className="overlay" onMouseDown={e => e.target === e.currentTarget && setSelected(null)}><div className="detail-modal"><div className="modal-head"><div><div className="eyebrow">PROSPECT DETAILS</div><h2>{selected.business_name}</h2><p className="muted">@{selected.instagram_handle} · {selected.location || "Location not set"}</p></div><button className="icon-btn" onClick={() => setSelected(null)}><X/></button></div>
-      <div className="detail-links"><a href={profileUrl(selected)} target="_blank" rel="noreferrer"><Instagram size={16}/> Open Instagram <ExternalLink size={13}/></a>{selected.website_url && <a href={selected.website_url} target="_blank" rel="noreferrer"><Globe2 size={16}/> Website <ExternalLink size={13}/></a>}</div>
+    {selected && <div className="overlay" onMouseDown={e => e.target === e.currentTarget && setSelected(null)}><div className="detail-modal"><div className="modal-head"><div><div className="eyebrow">PROSPECT DETAILS</div><h2>{selected.business_name}</h2><p className="muted">{selected.instagram_handle ? `@${selected.instagram_handle}` : "No Instagram profile"} · {selected.location || "Location not set"}</p></div><button className="icon-btn" onClick={() => setSelected(null)}><X/></button></div>
+      <div className="detail-links">{contactTarget(selected) ? <a href={contactTarget(selected).url} target="_blank" rel="noreferrer">{contactTarget(selected).kind === "instagram" ? <Instagram size={16}/> : contactTarget(selected).kind === "whatsapp" ? <MessageSquareText size={16}/> : contactTarget(selected).kind === "email" ? <Mail size={16}/> : <Globe2 size={16}/>} {contactTarget(selected).label} <ExternalLink size={13}/></a> : <span className="muted">No direct contact saved yet. Add a WhatsApp number, email, Instagram, or website.</span>}{selected.website_url && <a href={selected.website_url} target="_blank" rel="noreferrer"><Globe2 size={16}/> Website <ExternalLink size={13}/></a>}{selected.email && <a href={`mailto:${selected.email}`}><Mail size={16}/> Email <ExternalLink size={13}/></a>}</div>
       <label className="draft-label">PERSONALIZED MESSAGE DRAFT<textarea className="draft-area" value={draft} onChange={e => setDraft(e.target.value)} rows={9}/></label>
       <div className="draft-actions"><button className="btn secondary" onClick={() => setDraft(makeDraft(selected))}><Sparkles size={15}/> Regenerate draft</button><button className="btn secondary" onClick={() => saveDraft(selected,draft)}><Check size={15}/> Save draft</button>{selected.draftStatus === "approved" ? <button className="btn secondary" onClick={() => unapproveDraft(selected)}>Unapprove</button> : <button className="btn secondary" onClick={() => approveDraft(selected)} disabled={!selected.latestDraftId || selected.draftStatus === "sent"}>Approve</button>}<button className="btn primary" onClick={() => copyDraft(draft)}><Clipboard size={15}/> Copy message</button></div>
       <div className="send-warning"><MessageSquareText size={16}/><span>Review the message, open Instagram, and send it yourself. This tool does not auto-send cold DMs.</span></div><div className="draft-actions"><button className="btn secondary" disabled={selected.draftStatus !== "approved"} onClick={() => markSent(selected)}>Mark manually sent</button></div>
