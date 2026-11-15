@@ -22,3 +22,10 @@
 
 /* Approval state badges in the prospects table */
 .approval-pill{display:inline-flex;align-items:center;padding:5px 9px;border-radius:20px;font-size:9px;font-weight:700;white-space:nowrap}.approval-pill.is-approved{background:#243a25;color:#bdf09f;border:1px solid #426744}.approval-pill.is-pending{background:#302b20;color:#e6d59a;border:1px solid #51452b}
+
+/* Contact action buttons remain visible even when a prospect detail is missing */
+.detail-links{display:flex;gap:8px;flex-wrap:wrap}
+.detail-links a,.detail-links .contact-unavailable{display:inline-flex;align-items:center;gap:7px;color:#c8edb3;text-decoration:none;background:#1c2b20;border:1px solid #314735;border-radius:8px;padding:9px 11px;font-size:11px}
+.detail-links a:hover{border-color:#8bcf63;background:#243729}
+.detail-links .contact-unavailable{color:#849287;background:#131b15;border-color:#26342a;cursor:not-allowed;opacity:.8}
+.detail-links .contact-unavailable span{font-size:9px;color:#728075}
