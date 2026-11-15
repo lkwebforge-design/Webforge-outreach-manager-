@@ -24,13 +24,16 @@ function cleanHandle(value = "") {
 }
 function profileUrl(lead) {
   const savedUrl = safeText(lead?.instagram_profile_url).trim();
-  if (/^https?:\/\//i.test(savedUrl)) return savedUrl;
+  if (/^https?:\/\/(www\.)?instagram\.com\//i.test(savedUrl)) return savedUrl;
   const handle = cleanHandle(lead?.instagram_handle);
   return handle ? `https://www.instagram.com/${handle}/` : "";
 }
 function whatsappUrl(lead) {
-  const digits = safeText(lead?.phone).replace(/[^0-9]/g, "");
-  return digits.length >= 8 ? `https://wa.me/${digits}` : "";
+  let digits = safeText(lead?.phone).replace(/[^0-9]/g, "");
+  const location = safeText(lead?.location).toLowerCase();
+  if (digits.startsWith("0") && location.includes("sri lanka")) digits = `94${digits.slice(1)}`;
+  if (digits.length >= 8 && digits.length <= 15) return `https://wa.me/${digits}`;
+  return "";
 }
 function contactSearchUrl(lead, query) {
   const business = safeText(lead?.business_name).trim();
