@@ -28,6 +28,24 @@ function profileUrl(lead) {
   const handle = cleanHandle(lead?.instagram_handle);
   return handle ? `https://www.instagram.com/${handle}/` : "https://www.instagram.com/";
 }
+function normalizeLead(lead = {}, draft = null) {
+  const normalized = { ...lead };
+  for (const key of ["business_name", "instagram_handle", "instagram_profile_url", "website_url", "location", "business_type", "opportunity", "notes"]) {
+    normalized[key] = safeText(lead[key]).trim();
+  }
+  normalized.instagram_handle = cleanHandle(normalized.instagram_handle);
+  normalized.status = STATUSES.includes(lead.status) ? lead.status : "new";
+  normalized.created_at = safeText(lead.created_at) || new Date().toISOString();
+  normalized.dm_draft = safeText(draft?.message_text);
+  normalized.latestDraftId = draft?.id || null;
+  normalized.draftStatus = ["draft", "approved", "sent"].includes(draft?.status) ? draft.status : null;
+  return normalized;
+}
+function validHttpUrl(value) {
+  if (!value) return true;
+  try { const url = new URL(value); return url.protocol === "https:" || url.protocol === "http:"; }
+  catch { return false; }
+}
 function makeDraft(lead = {}) {
   const name = safeText(lead.business_name).trim() || "there";
   const opportunity = safeText(lead.opportunity).trim();
@@ -127,17 +145,14 @@ export default function App() {
     if (draftError) { notify(draftError.message); return; }
     const latest = new Map();
     for (const item of drafts || []) if (!latest.has(item.lead_id)) latest.set(item.lead_id, item);
-    setLeads((data || []).map(lead => {
-      const item = latest.get(lead.id);
-      return { ...lead, dm_draft: item?.message_text || "", latestDraftId: item?.id || null, draftStatus: item?.status || null };
-    }));
+    setLeads((data || []).map(lead => normalizeLead(lead, latest.get(lead.id) || null)));
   }
   useEffect(() => { loadLeads(); }, [session?.user?.id]);
   function notify(message) { setToast(message); window.setTimeout(() => setToast(""), 3200); }
 
   const filtered = useMemo(() => leads.filter(lead => {
     const q = query.toLowerCase();
-    const matches = !q || [lead.business_name, lead.instagram_handle, lead.location, lead.business_type].some(v => (v || "").toLowerCase().includes(q));
+    const matches = !q || [lead.business_name, lead.instagram_handle, lead.location, lead.business_type].some(v => safeText(v).toLowerCase().includes(q));
     const status = statusFilter === "all" || lead.status === statusFilter;
     const section = view === "queue" ? lead.draftStatus === "draft"
       : view === "approved" ? lead.draftStatus === "approved"
@@ -157,17 +172,22 @@ export default function App() {
   function openEdit(lead) { setEditing(lead); setForm({ ...emptyLead, ...lead }); setShowAdd(true); }
   async function saveLead(e) {
     e.preventDefault(); setSaving(true);
+    const businessName = safeText(form.business_name).trim();
     const handle = cleanHandle(form.instagram_handle);
-    if (!form.business_name.trim() || !handle) { notify("Business name and Instagram handle are required."); setSaving(false); return; }
+    const instagramUrl = safeText(form.instagram_profile_url).trim() || (handle ? `https://www.instagram.com/${handle}/` : "");
+    const websiteUrl = safeText(form.website_url).trim();
+    if (!businessName || !handle) { notify("Business name and a valid Instagram handle are required."); setSaving(false); return; }
+    if (!/^[a-z0-9._]{1,30}$/i.test(handle)) { notify("That Instagram handle doesn't look valid. Check it before saving."); setSaving(false); return; }
+    if (!validHttpUrl(instagramUrl) || !validHttpUrl(websiteUrl)) { notify("Website and Instagram links must be valid http or https URLs."); setSaving(false); return; }
     const payload = {
-      business_name: form.business_name.trim(),
+      business_name: businessName,
       instagram_handle: handle,
-      instagram_profile_url: form.instagram_profile_url.trim() || `https://www.instagram.com/${handle}/`,
-      website_url: form.website_url?.trim() || null,
-      location: form.location?.trim() || null,
-      business_type: form.business_type?.trim() || null,
-      opportunity: form.opportunity?.trim() || null,
-      notes: form.notes?.trim() || null
+      instagram_profile_url: instagramUrl,
+      website_url: websiteUrl || null,
+      location: safeText(form.location).trim() || null,
+      business_type: safeText(form.business_type).trim() || null,
+      opportunity: safeText(form.opportunity).trim() || null,
+      notes: safeText(form.notes).trim() || null
     };
     let result;
     if (editing) result = await supabase.from("outreach_leads").update(payload).eq("id", editing.id).select().single();
