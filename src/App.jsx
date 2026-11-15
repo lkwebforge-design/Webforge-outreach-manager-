@@ -32,16 +32,22 @@ function whatsappUrl(lead) {
   const digits = safeText(lead?.phone).replace(/[^0-9]/g, "");
   return digits.length >= 8 ? `https://wa.me/${digits}` : "";
 }
+function contactSearchUrl(lead, query) {
+  const business = safeText(lead?.business_name).trim();
+  const location = safeText(lead?.location).trim();
+  return `https://www.google.com/search?q=${encodeURIComponent(`${business} ${query} ${location}`.trim())}`;
+}
 function contactOptions(lead) {
   const instagram = profileUrl(lead);
   const whatsapp = whatsappUrl(lead);
   const email = safeText(lead?.email).trim();
   const website = safeText(lead?.website_url).trim();
+  const validWebsite = /^https?:\/\//i.test(website) ? website : "";
   return [
-    { label: "Instagram", url: instagram, kind: "instagram" },
-    { label: "WhatsApp", url: whatsapp, kind: "whatsapp" },
-    { label: "Email", url: email ? `mailto:${email}` : "", kind: "email" },
-    { label: "Website", url: /^https?:\/\//i.test(website) ? website : "", kind: "website" }
+    { label: instagram ? "Instagram" : "Find Instagram", url: instagram || contactSearchUrl(lead, "site:instagram.com"), kind: "instagram", fallback: !instagram },
+    { label: whatsapp ? "WhatsApp" : "Find WhatsApp", url: whatsapp || contactSearchUrl(lead, "WhatsApp contact phone number"), kind: "whatsapp", fallback: !whatsapp },
+    { label: email ? "Email" : "Find Email", url: email ? `mailto:${email}` : contactSearchUrl(lead, "official contact email"), kind: "email", fallback: !email },
+    { label: validWebsite ? "Website" : "Find Website", url: validWebsite || contactSearchUrl(lead, "official website"), kind: "website", fallback: !validWebsite }
   ];
 }
 function contactTarget(lead) {
@@ -372,7 +378,7 @@ export default function App() {
       <div className="modal-actions"><button type="button" className="btn secondary" onClick={() => setShowAdd(false)}>Cancel</button><button className="btn primary" disabled={saving}>{saving ? "Saving…" : editing ? "Save changes" : "Save prospect"}</button></div></form></div>}
 
     {selected && <div className="overlay" onMouseDown={e => e.target === e.currentTarget && setSelected(null)}><div className="detail-modal"><div className="modal-head"><div><div className="eyebrow">PROSPECT DETAILS</div><h2>{selected.business_name}</h2><p className="muted">{selected.instagram_handle ? `@${selected.instagram_handle}` : "No Instagram profile"} · {selected.location || "Location not set"}</p></div><button className="icon-btn" onClick={() => setSelected(null)}><X/></button></div>
-      <div className="detail-links">{contactOptions(selected).map(option => option.url ? <a key={option.kind} href={option.url} target={option.kind === "email" ? undefined : "_blank"} rel="noreferrer" aria-label={`Open ${option.label}`}>{option.kind === "instagram" ? <Instagram size={16}/> : option.kind === "whatsapp" ? <MessageSquareText size={16}/> : option.kind === "email" ? <Mail size={16}/> : <Globe2 size={16}/>} {option.label} <ExternalLink size={13}/></a> : <button key={option.kind} type="button" className="contact-unavailable" disabled title={`Add a ${option.label} detail to enable this button`}>{option.kind === "instagram" ? <Instagram size={16}/> : option.kind === "whatsapp" ? <MessageSquareText size={16}/> : option.kind === "email" ? <Mail size={16}/> : <Globe2 size={16}/>} {option.label} <span>Not added</span></button>)}</div>
+      <div className="detail-links">{contactOptions(selected).map(option => <a key={option.kind} className={option.fallback ? "contact-fallback" : ""} href={option.url} target="_blank" rel="noreferrer" aria-label={`${option.fallback ? "Search for" : "Open"} ${option.label}`} title={option.fallback ? "No verified detail saved; search for this business contact" : `Open saved ${option.label} detail`}>{option.kind === "instagram" ? <Instagram size={16}/> : option.kind === "whatsapp" ? <MessageSquareText size={16}/> : option.kind === "email" ? <Mail size={16}/> : <Globe2 size={16}/>} {option.label} <ExternalLink size={13}/></a>)}</div>
       <label className="draft-label">PERSONALIZED MESSAGE DRAFT<textarea className="draft-area" value={draft} onChange={e => setDraft(e.target.value)} rows={9}/></label>
       <div className="draft-actions"><button className="btn secondary" onClick={() => setDraft(makeDraft(selected))}><Sparkles size={15}/> Regenerate draft</button><button className="btn secondary" onClick={() => saveDraft(selected,draft)}><Check size={15}/> Save draft</button>{selected.draftStatus === "approved" ? <button className="btn secondary" onClick={() => unapproveDraft(selected)}>Unapprove</button> : <button className="btn secondary" onClick={() => approveDraft(selected)} disabled={!selected.latestDraftId || selected.draftStatus === "sent"}>Approve</button>}<button className="btn primary" onClick={() => copyDraft(draft)}><Clipboard size={15}/> Copy message</button></div>
       <div className="send-warning"><MessageSquareText size={16}/><span>Review the message, open Instagram, and send it yourself. This tool does not auto-send cold DMs.</span></div><div className="draft-actions"><button className="btn secondary" disabled={selected.draftStatus !== "approved"} onClick={() => markSent(selected)}>Mark manually sent</button></div>
