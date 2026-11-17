@@ -292,7 +292,7 @@ export default function App() {
   }
   async function unapproveDraft(lead) {
     if (!lead.latestDraftId || lead.draftStatus !== "approved") return;
-    const confirmed = window.confirm(`Unapprove ${lead.business_name}? Its draft will return to the review queue and won't appear in approved prospects.`);
+    const confirmed = window.confirm(`Unapprove ${lead.business_name}? It will move to the Unapproved list and won't appear in approved prospects.`);
     if (!confirmed) return;
     const { error } = await supabase.from("outreach_dm_drafts")
       .update({ status: "unapproved", approved_at: null }).eq("id", lead.latestDraftId).eq("status", "approved");
@@ -301,7 +301,7 @@ export default function App() {
       user_id: session.user.id, lead_id: lead.id, event_type: "dm_unapproved",
       details: "Draft approval withdrawn and returned to review queue"
     });
-    setSelected(current => current?.id === lead.id ? { ...current, draftStatus: "draft" } : current);
+    setSelected(current => current?.id === lead.id ? { ...current, draftStatus: "unapproved" } : current);
     notify("Prospect moved to Unapproved.");
     await loadLeads();
   }
@@ -358,8 +358,8 @@ export default function App() {
     </aside>
 
     <main className="main">
-      <header className="topbar"><div className="crumb">WebForge Signature <span>/</span> {view === "all" ? "Overview" : view === "queue" ? "Draft queue" : view === "approved" ? "Approved prospects" : "Follow-ups"}</div><div className="top-actions"><span className="secure"><span/> Private workspace</span><button className="btn primary" onClick={openAdd}><CirclePlus size={16}/> Add lead</button></div></header>
-      <section className="page-head"><div><div className="eyebrow">YOUR SALES PIPELINE</div><h1>{view === "all" ? "Outreach overview" : view === "queue" ? "Ready for review" : view === "approved" ? "Approved prospects" : "Keep conversations moving."}</h1><p className="muted">{view === "queue" ? "Review saved drafts and approve the messages you want to use." : view === "approved" ? "These prospects have an approved message and are ready for your manual outreach batch." : view === "unapproved" ? "Prospects you reviewed and chose not to approve. They stay separate from the draft queue." : view === "followups" ? "Track prospects who have already been contacted or shown interest." : "A clear view of every prospect, every draft, and every opportunity."}</p></div><div className="head-actions"><label className="btn secondary import-btn"><Upload size={16}/>{busyImport ? "Importing…" : "Import CSV"}<input type="file" accept=".csv,text/csv" disabled={busyImport} onChange={e => e.target.files?.[0] && importCsv(e.target.files[0])}/></label><button className="btn secondary" onClick={exportCsv}><Download size={16}/> Export</button></div></section>
+      <header className="topbar"><div className="crumb">WebForge Signature <span>/</span> {view === "all" ? "Overview" : view === "queue" ? "Draft queue" : view === "approved" ? "Approved prospects" : view === "unapproved" ? "Unapproved prospects" : "Follow-ups"}</div><div className="top-actions"><span className="secure"><span/> Private workspace</span><button className="btn primary" onClick={openAdd}><CirclePlus size={16}/> Add lead</button></div></header>
+      <section className="page-head"><div><div className="eyebrow">YOUR SALES PIPELINE</div><h1>{view === "all" ? "Outreach overview" : view === "queue" ? "Ready for review" : view === "approved" ? "Approved prospects" : view === "unapproved" ? "Unapproved prospects" : "Keep conversations moving."}</h1><p className="muted">{view === "queue" ? "Review saved drafts and approve the messages you want to use." : view === "approved" ? "These prospects have an approved message and are ready for your manual outreach batch." : view === "unapproved" ? "Prospects you reviewed and chose not to approve. They stay separate from the draft queue." : view === "followups" ? "Track prospects who have already been contacted or shown interest." : "A clear view of every prospect, every draft, and every opportunity."}</p></div><div className="head-actions"><label className="btn secondary import-btn"><Upload size={16}/>{busyImport ? "Importing…" : "Import CSV"}<input type="file" accept=".csv,text/csv" disabled={busyImport} onChange={e => e.target.files?.[0] && importCsv(e.target.files[0])}/></label><button className="btn secondary" onClick={exportCsv}><Download size={16}/> Export</button></div></section>
 
       <section className="stats-grid">
         <Stat icon={<Users/>} label="Total prospects" value={stats.total} note="All saved leads" active={view === "all"} onClick={() => {setView("all");setStatusFilter("all");}}/>
