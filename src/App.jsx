@@ -67,7 +67,7 @@ function normalizeLead(lead = {}, draft = null) {
   normalized.created_at = safeText(lead.created_at) || new Date().toISOString();
   normalized.dm_draft = safeText(draft?.message_text);
   normalized.latestDraftId = draft?.id || null;
-  normalized.draftStatus = ["draft", "approved", "sent"].includes(draft?.status) ? draft.status : null;
+  normalized.draftStatus = ["draft", "approved", "sent", "unapproved"].includes(draft?.status) ? draft.status : null;
   return normalized;
 }
 function validHttpUrl(value) {
@@ -185,6 +185,7 @@ export default function App() {
     const status = statusFilter === "all" || lead.status === statusFilter;
     const section = view === "queue" ? lead.draftStatus === "draft"
       : view === "approved" ? lead.draftStatus === "approved"
+      : view === "unapproved" ? lead.draftStatus === "unapproved"
       : view === "followups" ? ["contacted", "replied", "interested"].includes(lead.status) : true;
     return matches && status && section;
   }), [leads, query, statusFilter, view]);
@@ -194,7 +195,8 @@ export default function App() {
     queue: leads.filter(l => l.draftStatus === "draft").length,
     contacted: leads.filter(l => ["contacted", "replied", "interested"].includes(l.status)).length,
     clients: leads.filter(l => l.status === "client").length,
-    approved: leads.filter(l => l.draftStatus === "approved").length
+    approved: leads.filter(l => l.draftStatus === "approved").length,
+    unapproved: leads.filter(l => l.draftStatus === "unapproved").length
   }), [leads]);
 
   function openAdd() { setEditing(null); setForm(emptyLead); setShowAdd(true); }
@@ -242,9 +244,9 @@ export default function App() {
     if (error) notify(error.message); else { setSelected(null); notify("Lead deleted."); loadLeads(); }
   }
   async function saveDraft(lead, text) {
-    const payload = { user_id: session.user.id, lead_id: lead.id, message_text: text, status: "draft" };
+    const payload = { user_id: session.user.id, lead_id: lead.id, message_text: text, status: lead.draftStatus === "unapproved" ? "unapproved" : "draft" };
     const result = lead.latestDraftId
-      ? await supabase.from("outreach_dm_drafts").update({ message_text: text, status: "draft" }).eq("id", lead.latestDraftId)
+      ? await supabase.from("outreach_dm_drafts").update({ message_text: text, status: lead.draftStatus === "unapproved" ? "unapproved" : "draft" }).eq("id", lead.latestDraftId)
       : await supabase.from("outreach_dm_drafts").insert(payload);
     if (result.error) { notify(result.error.message); return; }
     if (["new", "researched"].includes(lead.status)) {
@@ -293,14 +295,14 @@ export default function App() {
     const confirmed = window.confirm(`Unapprove ${lead.business_name}? Its draft will return to the review queue and won't appear in approved prospects.`);
     if (!confirmed) return;
     const { error } = await supabase.from("outreach_dm_drafts")
-      .update({ status: "draft", approved_at: null }).eq("id", lead.latestDraftId).eq("status", "approved");
+      .update({ status: "unapproved", approved_at: null }).eq("id", lead.latestDraftId).eq("status", "approved");
     if (error) { notify(error.message); return; }
     await supabase.from("outreach_activity").insert({
       user_id: session.user.id, lead_id: lead.id, event_type: "dm_unapproved",
       details: "Draft approval withdrawn and returned to review queue"
     });
     setSelected(current => current?.id === lead.id ? { ...current, draftStatus: "draft" } : current);
-    notify("Prospect unapproved and returned to the draft queue.");
+    notify("Prospect moved to Unapproved.");
     await loadLeads();
   }
 
@@ -347,6 +349,7 @@ export default function App() {
       <button className={view === "all" ? "nav-item active" : "nav-item"} onClick={() => setView("all")}><LayoutDashboard size={17}/> Overview</button>
       <button className={view === "queue" ? "nav-item active" : "nav-item"} onClick={() => setView("queue")}><Send size={17}/> Draft queue <span>{stats.queue}</span></button>
       <button className={view === "approved" ? "nav-item active" : "nav-item"} onClick={() => setView("approved")}><Check size={17}/> Approved prospects <span>{stats.approved}</span></button>
+      <button className={view === "unapproved" ? "nav-item active" : "nav-item"} onClick={() => setView("unapproved")}><X size={17}/> Unapproved <span>{stats.unapproved}</span></button>
       <button className={view === "followups" ? "nav-item active" : "nav-item"} onClick={() => setView("followups")}><MessageSquareText size={17}/> Follow-ups</button>
       <div className="sidebar-bottom">
         <div className="account"><div className="avatar">{session.user.email?.[0]?.toUpperCase() || "W"}</div><div><strong>WebForge</strong><small>{session.user.email}</small></div></div>
@@ -356,20 +359,21 @@ export default function App() {
 
     <main className="main">
       <header className="topbar"><div className="crumb">WebForge Signature <span>/</span> {view === "all" ? "Overview" : view === "queue" ? "Draft queue" : view === "approved" ? "Approved prospects" : "Follow-ups"}</div><div className="top-actions"><span className="secure"><span/> Private workspace</span><button className="btn primary" onClick={openAdd}><CirclePlus size={16}/> Add lead</button></div></header>
-      <section className="page-head"><div><div className="eyebrow">YOUR SALES PIPELINE</div><h1>{view === "all" ? "Outreach overview" : view === "queue" ? "Ready for review" : view === "approved" ? "Approved prospects" : "Keep conversations moving."}</h1><p className="muted">{view === "queue" ? "Review saved drafts and approve the messages you want to use." : view === "approved" ? "These prospects have an approved message and are ready for your manual outreach batch." : view === "followups" ? "Track prospects who have already been contacted or shown interest." : "A clear view of every prospect, every draft, and every opportunity."}</p></div><div className="head-actions"><label className="btn secondary import-btn"><Upload size={16}/>{busyImport ? "Importing…" : "Import CSV"}<input type="file" accept=".csv,text/csv" disabled={busyImport} onChange={e => e.target.files?.[0] && importCsv(e.target.files[0])}/></label><button className="btn secondary" onClick={exportCsv}><Download size={16}/> Export</button></div></section>
+      <section className="page-head"><div><div className="eyebrow">YOUR SALES PIPELINE</div><h1>{view === "all" ? "Outreach overview" : view === "queue" ? "Ready for review" : view === "approved" ? "Approved prospects" : "Keep conversations moving."}</h1><p className="muted">{view === "queue" ? "Review saved drafts and approve the messages you want to use." : view === "approved" ? "These prospects have an approved message and are ready for your manual outreach batch." : view === "unapproved" ? "Prospects you reviewed and chose not to approve. They stay separate from the draft queue." : view === "followups" ? "Track prospects who have already been contacted or shown interest." : "A clear view of every prospect, every draft, and every opportunity."}</p></div><div className="head-actions"><label className="btn secondary import-btn"><Upload size={16}/>{busyImport ? "Importing…" : "Import CSV"}<input type="file" accept=".csv,text/csv" disabled={busyImport} onChange={e => e.target.files?.[0] && importCsv(e.target.files[0])}/></label><button className="btn secondary" onClick={exportCsv}><Download size={16}/> Export</button></div></section>
 
       <section className="stats-grid">
         <Stat icon={<Users/>} label="Total prospects" value={stats.total} note="All saved leads" active={view === "all"} onClick={() => {setView("all");setStatusFilter("all");}}/>
         <Stat icon={<Sparkles/>} label="New leads" value={stats.new} note="Not contacted yet" active={false} onClick={() => {setView("all");setStatusFilter("new");}}/>
         <Stat icon={<Send/>} label="Draft queue" value={stats.queue} note="Awaiting approval" active={view === "queue"} onClick={() => {setView("queue");setStatusFilter("all");}}/>
         <Stat icon={<Check/>} label="Approved prospects" value={stats.approved} note="Approved for outreach" active={view === "approved"} onClick={() => {setView("approved");setStatusFilter("all");}}/>
+        <Stat icon={<X/>} label="Unapproved" value={stats.unapproved} note="Removed from approval" active={view === "unapproved"} onClick={() => {setView("unapproved");setStatusFilter("all");}}/>
         <Stat icon={<Activity/>} label="In conversation" value={stats.contacted} note="Contacted or interested" active={view === "followups"} onClick={() => {setView("followups");setStatusFilter("all");}}/>
         <Stat icon={<Target/>} label="Clients" value={stats.clients} note="Won opportunities" active={false} onClick={() => {setView("all");setStatusFilter("client");}}/>
       </section>
 
       <section className="panel">
-        <div className="panel-head"><div><h2>{view === "queue" ? "Message review queue" : view === "approved" ? "Approved prospects" : view === "followups" ? "Follow-up pipeline" : "All prospects"}</h2><p className="muted">{filtered.length} records · duplicate Instagram handles are blocked</p></div><div className="filters"><div className="searchbox"><Search size={16}/><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search business or handle"/></div><div className="select-wrap"><Filter size={15}/><select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}><option value="all">All statuses</option>{STATUSES.map(s => <option key={s} value={s}>{STATUS_LABELS[s]}</option>)}</select><ChevronDown size={14}/></div></div>{view === "all" && <button className="btn primary" onClick={approveAllProspects} disabled={saving || !leads.some(l => l.latestDraftId && l.draftStatus === "draft")}><Check size={15}/>{saving ? "Approving…" : "Approve all prospects"}</button>}</div>
-        {filtered.length === 0 ? <div className="empty"><div className="empty-icon"><Instagram/></div><h3>{view === "approved" ? "No approved prospects yet" : "No prospects here yet"}</h3><p className="muted">{view === "approved" ? "Approve a saved message draft to add a business to this list." : "Add a lead manually or import your verified Instagram prospect list."}</p>{view !== "approved" && <button className="btn primary" onClick={openAdd}><CirclePlus size={16}/> Add your first lead</button>}</div> :
+        <div className="panel-head"><div><h2>{view === "queue" ? "Message review queue" : view === "approved" ? "Approved prospects" : view === "unapproved" ? "Unapproved prospects" : view === "followups" ? "Follow-up pipeline" : "All prospects"}</h2><p className="muted">{filtered.length} records · duplicate Instagram handles are blocked</p></div><div className="filters"><div className="searchbox"><Search size={16}/><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search business or handle"/></div><div className="select-wrap"><Filter size={15}/><select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}><option value="all">All statuses</option>{STATUSES.map(s => <option key={s} value={s}>{STATUS_LABELS[s]}</option>)}</select><ChevronDown size={14}/></div></div>{view === "all" && <button className="btn primary" onClick={approveAllProspects} disabled={saving || !leads.some(l => l.latestDraftId && l.draftStatus === "draft")}><Check size={15}/>{saving ? "Approving…" : "Approve all prospects"}</button>}</div>
+        {filtered.length === 0 ? <div className="empty"><div className="empty-icon"><Instagram/></div><h3>{view === "approved" ? "No approved prospects yet" : view === "unapproved" ? "No unapproved prospects" : "No prospects here yet"}</h3><p className="muted">{view === "approved" ? "Approve a saved message draft to add a business to this list." : view === "unapproved" ? "When you unapprove a prospect, it will appear here." : "Add a lead manually or import your verified Instagram prospect list."}</p>{view !== "approved" && <button className="btn primary" onClick={openAdd}><CirclePlus size={16}/> Add your first lead</button>}</div> :
           <div className="table-wrap"><table><thead><tr><th>BUSINESS</th><th>LOCATION</th><th>OPPORTUNITY</th><th>STATUS</th><th>APPROVAL</th><th>ADDED</th><th></th></tr></thead><tbody>{filtered.map(lead => <tr key={lead.id} onClick={() => { setSelected(lead); setDraft(safeText(lead.dm_draft) || makeDraft(lead)); }}><td><div className="business-cell"><div className="ig-avatar"><Instagram size={16}/></div><div><strong>{lead.business_name}</strong><small>@{lead.instagram_handle}</small></div></div></td><td>{lead.location || "—"}</td><td className="opportunity">{lead.opportunity || lead.business_type || "Needs review"}</td><td><span className={`status status-${lead.status}`}>{STATUS_LABELS[lead.status]}</span></td><td><span className={`approval-pill ${["approved", "sent"].includes(lead.draftStatus) ? "is-approved" : "is-pending"}`}>{["approved", "sent"].includes(lead.draftStatus) ? "Approved" : "Not approved"}</span></td><td>{new Date(lead.created_at).toLocaleDateString()}</td><td><button className="icon-btn" onClick={e => { e.stopPropagation(); setSelected(lead); setDraft(safeText(lead.dm_draft) || makeDraft(lead)); }}><ArrowUpRight size={17}/></button></td></tr>)}</tbody></table></div>}
       </section>
       {view === "approved" && filtered.length > 0 && <div className="bulk-bar"><div><strong>{filtered.length} approved prospect{filtered.length === 1 ? "" : "s"}</strong><small>Messages are prepared for manual sending. Nothing is sent automatically.</small></div><button className="btn primary" onClick={() => setShowBulkQueue(true)}><Send size={15}/> Start bulk-send queue</button></div>}
@@ -384,7 +388,7 @@ export default function App() {
     {selected && <div className="overlay" onMouseDown={e => e.target === e.currentTarget && setSelected(null)}><div className="detail-modal"><div className="modal-head"><div><div className="eyebrow">PROSPECT DETAILS</div><h2>{selected.business_name}</h2><p className="muted">{selected.instagram_handle ? `@${selected.instagram_handle}` : "No Instagram profile"} · {selected.location || "Location not set"}</p></div><button className="icon-btn" onClick={() => setSelected(null)}><X/></button></div>
       <div className="detail-links">{contactOptions(selected).map(option => <a key={option.kind} className={option.fallback ? "contact-fallback" : ""} href={option.url} target="_blank" rel="noreferrer" aria-label={`${option.fallback ? "Search for" : "Open"} ${option.label}`} title={option.fallback ? "No verified detail saved; search for this business contact" : `Open saved ${option.label} detail`}>{option.kind === "instagram" ? <Instagram size={16}/> : option.kind === "whatsapp" ? <MessageSquareText size={16}/> : option.kind === "email" ? <Mail size={16}/> : <Globe2 size={16}/>} {option.label} <ExternalLink size={13}/></a>)}</div>
       <label className="draft-label">PERSONALIZED MESSAGE DRAFT<textarea className="draft-area" value={draft} onChange={e => setDraft(e.target.value)} rows={9}/></label>
-      <div className="draft-actions"><button className="btn secondary" onClick={() => setDraft(makeDraft(selected))}><Sparkles size={15}/> Regenerate draft</button><button className="btn secondary" onClick={() => saveDraft(selected,draft)}><Check size={15}/> Save draft</button>{selected.draftStatus === "approved" ? <button className="btn secondary" onClick={() => unapproveDraft(selected)}>Unapprove</button> : <button className="btn secondary" onClick={() => approveDraft(selected)} disabled={!selected.latestDraftId || selected.draftStatus === "sent"}>Approve</button>}<button className="btn primary" onClick={() => copyDraft(draft)}><Clipboard size={15}/> Copy message</button></div>
+      <div className="draft-actions"><button className="btn secondary" onClick={() => setDraft(makeDraft(selected))}><Sparkles size={15}/> Regenerate draft</button><button className="btn secondary" onClick={() => saveDraft(selected,draft)}><Check size={15}/> Save draft</button>{["approved", "sent"].includes(selected.draftStatus) ? <button className="btn secondary" onClick={() => unapproveDraft(selected)} disabled={selected.draftStatus === "sent"}>Unapprove</button> : <button className="btn secondary" onClick={() => approveDraft(selected)} disabled={!selected.latestDraftId}>Approve</button>}<button className="btn primary" onClick={() => copyDraft(draft)}><Clipboard size={15}/> Copy message</button></div>
       <div className="send-warning"><MessageSquareText size={16}/><span>Review the message, open Instagram, and send it yourself. This tool does not auto-send cold DMs.</span></div><div className="draft-actions"><button className="btn secondary" disabled={selected.draftStatus !== "approved"} onClick={() => markSent(selected)}>Mark manually sent</button></div>
       <div className="detail-bottom"><label>Status<select value={selected.status} onChange={e => { updateStatus(selected,e.target.value); setSelected({...selected,status:e.target.value}); }} >{STATUSES.map(s => <option key={s} value={s}>{STATUS_LABELS[s]}</option>)}</select></label><button className="btn danger" onClick={() => deleteLead(selected)}><Trash2 size={15}/> Delete lead</button></div>
       <button className="text-btn edit-link" onClick={() => { setSelected(null); openEdit(selected); }}>Edit prospect details</button>
