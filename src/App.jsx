@@ -285,10 +285,18 @@ export default function App() {
     const a = document.createElement("a"); a.href = url; a.download = "webforge-leads.csv"; a.click(); URL.revokeObjectURL(url);
   }
   async function approveDraft(lead) {
-    if (!lead.latestDraftId) { notify("Save the draft before approving it."); return; }
-    const { error } = await supabase.from("outreach_dm_drafts").update({ status: "approved", approved_at: new Date().toISOString() }).eq("id", lead.latestDraftId);
-    if (error) notify(error.message);
-    else { await supabase.from("outreach_activity").insert({ user_id: session.user.id, lead_id: lead.id, event_type: "dm_approved", details: "Draft approved for manual sending" }); notify("Draft approved."); await loadLeads(); }
+    const message = (selected?.id === lead.id ? draft : lead.dm_draft) || makeDraft(lead);
+    const now = new Date().toISOString();
+    let error = null;
+    if (lead.latestDraftId) {
+      ({ error } = await supabase.from("outreach_dm_drafts").update({ message_text: message, status: "approved", approved_at: now }).eq("id", lead.latestDraftId));
+    } else {
+      const result = await supabase.from("outreach_dm_drafts").insert({ user_id: session.user.id, lead_id: lead.id, message_text: message, status: "approved", approved_at: now });
+      error = result.error;
+    }
+    if (error) { notify(error.message); return; }
+    await supabase.from("outreach_activity").insert({ user_id: session.user.id, lead_id: lead.id, event_type: "dm_approved", details: "Draft approved for manual sending" });
+    notify("Draft approved."); await loadLeads();
   }
   async function unapproveDraft(lead) {
     if (!lead.latestDraftId || lead.draftStatus !== "approved") return;
@@ -307,32 +315,47 @@ export default function App() {
   }
 
   async function approveAllProspects() {
-    const eligible = leads.filter(lead => lead.latestDraftId && lead.draftStatus === "draft");
-    if (!eligible.length) { notify("No saved drafts are waiting for approval."); return; }
-    const confirmed = window.confirm(`Approve the saved drafts for all ${eligible.length} prospects? This only approves drafts; it will not send any messages.`);
+    const eligible = leads.filter(lead => !["approved", "sent", "unapproved"].includes(lead.draftStatus));
+    if (!eligible.length) { notify("No prospects are waiting for approval."); return; }
+    const confirmed = window.confirm(`Prepare and approve messages for all ${eligible.length} eligible prospects? This only approves drafts; it will not send any messages.`);
     if (!confirmed) return;
     setSaving(true);
-    const ids = eligible.map(lead => lead.latestDraftId);
     const now = new Date().toISOString();
-    const { error } = await supabase.from("outreach_dm_drafts")
-      .update({ status: "approved", approved_at: now })
-      .in("id", ids).eq("status", "draft");
-    if (error) { notify(error.message); setSaving(false); return; }
+    const missing = eligible.filter(lead => !lead.latestDraftId);
+    if (missing.length) {
+      const { error } = await supabase.from("outreach_dm_drafts").insert(missing.map(lead => ({
+        user_id: session.user.id, lead_id: lead.id, message_text: makeDraft(lead), status: "approved", approved_at: now
+      })));
+      if (error) { notify(error.message); setSaving(false); return; }
+    }
+    const existingIds = eligible.filter(lead => lead.latestDraftId).map(lead => lead.latestDraftId);
+    if (existingIds.length) {
+      const { error } = await supabase.from("outreach_dm_drafts").update({ status: "approved", approved_at: now })
+        .in("id", existingIds).in("status", ["draft", "unapproved"]);
+      if (error) { notify(error.message); setSaving(false); return; }
+    }
     await supabase.from("outreach_activity").insert(eligible.map(lead => ({
       user_id: session.user.id, lead_id: lead.id, event_type: "dm_approved",
-      details: "Draft approved in bulk for manual sending"
+      details: "Prospect draft prepared and approved in bulk for manual sending"
     })));
     setSaving(false);
-    notify(`Approved ${eligible.length} prospect drafts. No messages were sent.`);
+    notify(`Approved ${eligible.length} prospects. No messages were sent.`);
     await loadLeads();
   }
 
   async function markSent(lead) {
-    if (!lead.latestDraftId || lead.draftStatus !== "approved") { notify("Approve the saved draft before marking it sent."); return; }
     const now = new Date().toISOString();
-    const { error } = await supabase.from("outreach_dm_drafts").update({ status: "sent", sent_at: now, sent_method: "manual_instagram" }).eq("id", lead.latestDraftId);
+    const message = (selected?.id === lead.id ? draft : lead.dm_draft) || makeDraft(lead);
+    let error = null;
+    if (lead.latestDraftId) {
+      ({ error } = await supabase.from("outreach_dm_drafts").update({ message_text: message, status: "sent", sent_at: now, sent_method: "manual_instagram" }).eq("id", lead.latestDraftId));
+    } else {
+      const result = await supabase.from("outreach_dm_drafts").insert({ user_id: session.user.id, lead_id: lead.id, message_text: message, status: "sent", sent_at: now, sent_method: "manual_instagram" });
+      error = result.error;
+    }
     if (error) { notify(error.message); return; }
-    await supabase.from("outreach_leads").update({ status: "contacted", last_contacted_at: now }).eq("id", lead.id);
+    const leadUpdate = await supabase.from("outreach_leads").update({ status: "contacted", last_contacted_at: now }).eq("id", lead.id);
+    if (leadUpdate.error) { notify(leadUpdate.error.message); return; }
     await supabase.from("outreach_activity").insert({ user_id: session.user.id, lead_id: lead.id, event_type: "dm_sent_manually", details: "User marked manually sent" });
     notify("Marked as manually sent."); setSelected(null); await loadLeads();
   }
