@@ -44,3 +44,6 @@ td.location-cell{font-size:11px!important;font-weight:400!important;line-height:
 
 /* Enforce the same compact typography used by the other prospect table details. */
 table tbody td.location-cell{font-family:'DM Sans',sans-serif!important;font-size:11px!important;font-weight:400!important;line-height:1.45!important;letter-spacing:0!important;color:#b7c4ba!important;}
+
+/* Prevent mobile browsers from inflating long prospect addresses. */
+table tbody td.location-cell{-webkit-text-size-adjust:100%!important;text-size-adjust:100%!important;font-family:'DM Sans',sans-serif!important;font-size:11px!important;font-weight:400!important;line-height:1.45!important;letter-spacing:0!important;color:#b7c4ba!important;}
