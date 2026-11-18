@@ -36,3 +36,7 @@
 .detail-links a:hover{border-color:#8bcf63;background:#243729}
 .detail-links a.contact-fallback{color:#d4d9c9;background:#1b211b;border-style:dashed;border-color:#53614f}
 .detail-links a.contact-fallback:hover{color:#c8edb3;border-color:#8bcf63}
+
+
+/* Keep prospect addresses visually consistent with the other table values. */
+td.location-cell{font-size:11px!important;font-weight:400!important;line-height:1.45;color:#b7c4ba;letter-spacing:0;vertical-align:middle;}
