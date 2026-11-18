@@ -40,3 +40,7 @@
 
 /* Keep prospect addresses visually consistent with the other table values. */
 td.location-cell{font-size:11px!important;font-weight:400!important;line-height:1.45;color:#b7c4ba;letter-spacing:0;vertical-align:middle;}
+
+
+/* Enforce the same compact typography used by the other prospect table details. */
+table tbody td.location-cell{font-family:'DM Sans',sans-serif!important;font-size:11px!important;font-weight:400!important;line-height:1.45!important;letter-spacing:0!important;color:#b7c4ba!important;}
