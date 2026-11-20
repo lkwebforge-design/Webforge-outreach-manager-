@@ -79,13 +79,13 @@ function makeDraftVariants(lead = {}) {
   const name = safeText(lead.business_name).trim() || "your business";
   const category = safeText(lead.business_type).trim() || "business";
   const observation = safeText(lead.opportunity || lead.research_evidence || lead.notes).trim().replace(/[.!?]+$/, "");
-  const detail = observation || \`I noticed there may be an opportunity to make it easier for customers to discover \${name} and learn what you offer\`;
+  const detail = observation || `I noticed there may be an opportunity to make it easier for customers to discover ${name} and learn what you offer`;
   const signature = "\n\n— WebForge Signature";
   return [
-    { label: "Personal & friendly", message: \`Hi \${name}! I came across your \${category} business and wanted to reach out. \${detail}. I have a couple of ideas that could help more people find the information they need before choosing a business like yours. Would you be open to me sharing them?\${signature}\` },
-    { label: "Customer-focused", message: \`Hi! I was checking out \${name} and started thinking about the experience customers have before they visit. \${detail}. A clear, helpful website can answer common questions and make it easier for people to contact you. Would it be okay if I sent over a few suggestions?\${signature}\` },
-    { label: "Short & direct", message: \`Hey \${name}! I'm with WebForge Signature. I noticed an opportunity for your \${category} business: \${detail}. We create modern websites that help customers understand your services and get in touch easily. Open to seeing a few ideas?\${signature}\` },
-    { label: "Value-first / soft approach", message: \`Hello \${name}, I hope you're doing well. I was researching \${category} businesses and came across yours. \${detail}. I don't want to send you a generic sales pitch — I'd rather share a few practical ideas that may improve how customers discover and learn about your business online. Would that be useful?\${signature}\` }
+    { label: "Personal & friendly", message: `Hi ${name}! I came across your ${category} business and wanted to reach out. ${detail}. I have a couple of ideas that could help more people find the information they need before choosing a business like yours. Would you be open to me sharing them?${signature}` },
+    { label: "Customer-focused", message: `Hi! I was checking out ${name} and started thinking about the experience customers have before they visit. ${detail}. A clear, helpful website can answer common questions and make it easier for people to contact you. Would it be okay if I sent over a few suggestions?${signature}` },
+    { label: "Short & direct", message: `Hey ${name}! I'm with WebForge Signature. I noticed an opportunity for your ${category} business: ${detail}. We create modern websites that help customers understand your services and get in touch easily. Open to seeing a few ideas?${signature}` },
+    { label: "Value-first / soft approach", message: `Hello ${name}, I hope you're doing well. I was researching ${category} businesses and came across yours. ${detail}. I don't want to send you a generic sales pitch — I'd rather share a few practical ideas that may improve how customers discover and learn about your business online. Would that be useful?${signature}` }
   ];
 }
 function makeDraft(lead = {}) { return makeDraftVariants(lead)[0].message; }
@@ -294,7 +294,7 @@ export default function App() {
       const latestId = data?.[0]?.id || null;
       if (["new", "researched"].includes(lead.status)) {
         const { error: statusError } = await supabase.from("outreach_leads").update({ status: "draft_ready" }).eq("id", lead.id);
-        if (statusError) notify(\`Messages saved, but lead status could not be updated: \${statusError.message}\`);
+        if (statusError) notify(`Messages saved, but lead status could not be updated: ${statusError.message}`);
       }
       await supabase.from("outreach_activity").insert({
         user_id: session.user.id, lead_id: lead.id, event_type: "dm_drafted",
@@ -306,7 +306,7 @@ export default function App() {
       await loadLeads();
       notify("4 message options generated and saved. Choose the best one for this lead.");
     } catch (error) {
-      notify(\`Could not save message options: \${error?.message || "Please try again."}\`);
+      notify(`Could not save message options: ${error?.message || "Please try again."}`);
     } finally {
       setGeneratingDraft(false);
     }
