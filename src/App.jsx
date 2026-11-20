@@ -261,16 +261,20 @@ export default function App() {
   async function saveDraft(lead, text) {
     const payload = { user_id: session.user.id, lead_id: lead.id, message_text: text, status: lead.draftStatus === "unapproved" ? "unapproved" : "draft" };
     const result = lead.latestDraftId
-      ? await supabase.from("outreach_dm_drafts").update({ message_text: text, status: lead.draftStatus === "unapproved" ? "unapproved" : "draft" }).eq("id", lead.latestDraftId)
-      : await supabase.from("outreach_dm_drafts").insert(payload);
-    if (result.error) { notify(`Could not save draft: ${result.error.message}`); return false; }
+      ? await supabase.from("outreach_dm_drafts").update({ message_text: text, status: lead.draftStatus === "unapproved" ? "unapproved" : "draft" }).eq("id", lead.latestDraftId).select("id").single()
+      : await supabase.from("outreach_dm_drafts").insert(payload).select("id").single();
+    if (result.error) { notify(`Message generated, but saving failed: ${result.error.message}`); return false; }
+    const savedDraftId = result.data?.id || lead.latestDraftId;
     if (["new", "researched"].includes(lead.status)) {
       const { error } = await supabase.from("outreach_leads").update({ status: "draft_ready" }).eq("id", lead.id);
       if (error) notify(`Draft saved, but lead status could not be updated: ${error.message}`);
     }
     const activity = await supabase.from("outreach_activity").insert({ user_id: session.user.id, lead_id: lead.id, event_type: "dm_drafted", details: "DM draft saved" });
     if (activity.error) notify(`Draft saved, but activity log failed: ${activity.error.message}`);
-    else notify("Draft saved successfully.");
+    else notify("DM generated and saved successfully.");
+    setSelected(current => current?.id === lead.id
+      ? { ...current, dm_draft: text, latestDraftId: savedDraftId, draftStatus: current.draftStatus === "unapproved" ? "unapproved" : "draft" }
+      : current);
     await loadLeads();
     return true;
   }
@@ -281,12 +285,10 @@ export default function App() {
     try {
       const generated = makeDraft(lead);
       setDraft(generated);
-      const saved = await saveDraft(lead, generated);
-      if (saved) setSelected(current => current?.id === lead.id
-        ? { ...current, dm_draft: generated, draftStatus: current.draftStatus === "unapproved" ? "unapproved" : "draft" }
-        : current);
+      notify("DM generated. Saving your draft…");
+      await saveDraft(lead, generated);
     } catch (error) {
-      notify(`Could not generate the DM: ${error?.message || "Please try again."}`);
+      notify(`Message generated, but saving failed: ${error?.message || "Please try again."}`);
     } finally {
       setGeneratingDraft(false);
     }
@@ -448,7 +450,7 @@ export default function App() {
     {selected && <div className="overlay" onMouseDown={e => e.target === e.currentTarget && setSelected(null)}><div className="detail-modal"><div className="modal-head"><div><div className="eyebrow">PROSPECT DETAILS</div><h2>{selected.business_name}</h2><p className="muted">{selected.instagram_handle ? `@${selected.instagram_handle}` : "No Instagram profile"} · {selected.location || "Location not set"}</p></div><button className="icon-btn" onClick={() => setSelected(null)}><X/></button></div>
       <div className="detail-links">{contactOptions(selected).map(option => <a key={option.kind} className={option.fallback ? "contact-fallback" : ""} href={option.url} target="_blank" rel="noreferrer" aria-label={`${option.fallback ? "Search for" : "Open"} ${option.label}`} title={option.fallback ? "No verified detail saved; search for this business contact" : `Open saved ${option.label} detail`}>{option.kind === "instagram" ? <Instagram size={16}/> : option.kind === "whatsapp" ? <MessageSquareText size={16}/> : option.kind === "email" ? <Mail size={16}/> : <Globe2 size={16}/>} {option.label} <ExternalLink size={13}/></a>)}</div>
       <label className="draft-label">PERSONALIZED MESSAGE DRAFT<textarea className="draft-area" value={draft} onChange={e => setDraft(e.target.value)} rows={9}/></label>
-      <div className="draft-actions"><button className="btn secondary" onClick={() => selected.lead_category === "underrated" ? generateAndSaveDraft(selected) : setDraft(makeDraft(selected))} disabled={generatingDraft}><Sparkles size={15}/> {generatingDraft ? "Generating…" : selected.lead_category === "underrated" ? "Generate & save DM" : "Regenerate draft"}</button><button className="btn secondary" onClick={() => saveDraft(selected,draft)}><Check size={15}/> Save draft</button>{["approved", "sent"].includes(selected.draftStatus) ? <button className="btn secondary" onClick={() => unapproveDraft(selected)} disabled={selected.draftStatus === "sent"}>Unapprove</button> : <button className="btn secondary" onClick={() => approveDraft(selected)}>Approve</button>}<button className="btn primary" onClick={() => copyDraft(draft)}><Clipboard size={15}/> Copy message</button></div>
+      <div className="draft-actions"><button className="btn secondary" onClick={() => generateAndSaveDraft(selected)} disabled={generatingDraft}><Sparkles size={15}/> {generatingDraft ? "Generating…" : "Generate & save DM"}</button><button className="btn secondary" onClick={() => saveDraft(selected,draft)}><Check size={15}/> Save draft</button>{["approved", "sent"].includes(selected.draftStatus) ? <button className="btn secondary" onClick={() => unapproveDraft(selected)} disabled={selected.draftStatus === "sent"}>Unapprove</button> : <button className="btn secondary" onClick={() => approveDraft(selected)}>Approve</button>}<button className="btn primary" onClick={() => copyDraft(draft)}><Clipboard size={15}/> Copy message</button></div>
       <div className="send-warning"><MessageSquareText size={16}/><span>Review the message, open Instagram, and send it yourself. This tool does not auto-send cold DMs.</span></div><div className="draft-actions"><button className="btn secondary" onClick={() => markSent(selected)}>Mark manually sent</button></div>
       <div className="detail-bottom"><label>Status<select value={selected.status} onChange={e => { updateStatus(selected,e.target.value); setSelected({...selected,status:e.target.value}); }} >{STATUSES.map(s => <option key={s} value={s}>{STATUS_LABELS[s]}</option>)}</select></label><button className="btn danger" onClick={() => deleteLead(selected)}><Trash2 size={15}/> Delete lead</button></div>
       <button className="text-btn edit-link" onClick={() => { setSelected(null); openEdit(selected); }}>Edit prospect details</button>
