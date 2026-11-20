@@ -47,3 +47,12 @@ table tbody td.location-cell{font-family:'DM Sans',sans-serif!important;font-siz
 
 /* Prevent mobile browsers from inflating long prospect addresses. */
 table tbody td.location-cell{-webkit-text-size-adjust:100%!important;text-size-adjust:100%!important;font-family:'DM Sans',sans-serif!important;font-size:11px!important;font-weight:400!important;line-height:1.45!important;letter-spacing:0!important;color:#b7c4ba!important;}
+
+
+/* Multiple personalized DM styles */
+.variant-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:8px 0 16px}
+.variant-option{display:flex;flex-direction:column;gap:6px;text-align:left;padding:11px 12px;border:1px solid #304235;border-radius:9px;background:#111a14;color:#dce8dc;cursor:pointer;min-width:0}
+.variant-option strong{font-size:11px;color:#c9edb6}
+.variant-option span{font-size:10px;line-height:1.45;color:#9cac9e}
+.variant-option.active{border-color:#8bcf63;background:#1b2b1e;box-shadow:inset 0 0 0 1px #8bcf6340}
+@media(max-width:560px){.variant-list{grid-template-columns:1fr}}
