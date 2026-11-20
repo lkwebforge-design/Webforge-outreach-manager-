@@ -398,6 +398,7 @@ export default function App() {
         <Stat icon={<X/>} label="Unapproved" value={stats.unapproved} note="Removed from approval" active={view === "unapproved"} onClick={() => {setView("unapproved");setStatusFilter("all");}}/>
         <Stat icon={<Activity/>} label="In conversation" value={stats.contacted} note="Contacted or interested" active={view === "followups"} onClick={() => {setView("followups");setStatusFilter("all");}}/>
         <Stat icon={<Target/>} label="Clients" value={stats.clients} note="Won opportunities" active={false} onClick={() => {setView("all");setStatusFilter("client");}}/>
+        <Stat icon={<Sparkles/>} label="Underrated Leads" value={stats.underrated} note="Hidden growth opportunities" active={view === "underrated"} onClick={() => {setView("underrated");setStatusFilter("all");}}/>
       </section>
 
       <section className="panel">
