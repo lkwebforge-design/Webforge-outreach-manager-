@@ -75,24 +75,20 @@ function validHttpUrl(value) {
   try { const url = new URL(value); return url.protocol === "https:" || url.protocol === "http:"; }
   catch { return false; }
 }
-function makeDraft(lead = {}) {
+function makeDraftVariants(lead = {}) {
   const name = safeText(lead.business_name).trim() || "your business";
-  const category = safeText(lead.business_type).trim() || "your industry";
-  const opportunity = safeText(lead.opportunity).trim();
-  const evidence = safeText(lead.research_evidence).trim();
-  const notes = safeText(lead.notes).trim();
-  const observation = opportunity || evidence || notes;
-  if (lead.lead_category === "underrated") {
-    const insight = observation
-      ? `I noticed ${observation.replace(/[.!?]+$/, "")}.`
-      : `I was looking at how customers discover ${name} online and spotted a few areas where useful information could be easier to find.`;
-    return `Hi ${name}! I came across your ${category} business and noticed an opportunity that may help make things easier for potential customers. ${insight} A clearer online presence could help people quickly understand what you offer, find the details they need before visiting, and feel confident getting in touch. I have a couple of practical ideas I'd be happy to share. Would you be open to a quick chat?\n\n— WebForge Signature`;
-  }
-  const detail = observation
-    ? ` I noticed ${observation.replace(/[.!?]+$/, "")}.`
-    : " I came across your business and wanted to reach out.";
-  return `Hi ${name}! 👋 I'm reaching out from WebForge Signature, a Sri Lankan web design team.${detail} We build modern websites that help businesses present their services clearly and make it easier for customers to contact them. Would you be open to seeing a few ideas for your business?\n\nhttps://lkwebforge-design.github.io/WEBFORGE-SIGNATURE/`;
+  const category = safeText(lead.business_type).trim() || "business";
+  const observation = safeText(lead.opportunity || lead.research_evidence || lead.notes).trim().replace(/[.!?]+$/, "");
+  const detail = observation || \`I noticed there may be an opportunity to make it easier for customers to discover \${name} and learn what you offer\`;
+  const signature = "\n\n— WebForge Signature";
+  return [
+    { label: "Personal & friendly", message: \`Hi \${name}! I came across your \${category} business and wanted to reach out. \${detail}. I have a couple of ideas that could help more people find the information they need before choosing a business like yours. Would you be open to me sharing them?\${signature}\` },
+    { label: "Customer-focused", message: \`Hi! I was checking out \${name} and started thinking about the experience customers have before they visit. \${detail}. A clear, helpful website can answer common questions and make it easier for people to contact you. Would it be okay if I sent over a few suggestions?\${signature}\` },
+    { label: "Short & direct", message: \`Hey \${name}! I'm with WebForge Signature. I noticed an opportunity for your \${category} business: \${detail}. We create modern websites that help customers understand your services and get in touch easily. Open to seeing a few ideas?\${signature}\` },
+    { label: "Value-first / soft approach", message: \`Hello \${name}, I hope you're doing well. I was researching \${category} businesses and came across yours. \${detail}. I don't want to send you a generic sales pitch — I'd rather share a few practical ideas that may improve how customers discover and learn about your business online. Would that be useful?\${signature}\` }
+  ];
 }
+function makeDraft(lead = {}) { return makeDraftVariants(lead)[0].message; }
 function csvCell(value) {
   return `"${String(value ?? "").replaceAll('"', '""')}"`;
 }
@@ -166,6 +162,8 @@ export default function App() {
   const [toast, setToast] = useState("");
   const [selected, setSelected] = useState(null);
   const [draft, setDraft] = useState("");
+  const [draftVariants, setDraftVariants] = useState([]);
+  const [activeVariant, setActiveVariant] = useState(0);
   const [generatingDraft, setGeneratingDraft] = useState(false);
   const [busyImport, setBusyImport] = useState(false);
   const [showBulkQueue, setShowBulkQueue] = useState(false);
@@ -283,12 +281,32 @@ export default function App() {
     if (!lead?.id || generatingDraft) return;
     setGeneratingDraft(true);
     try {
-      const generated = makeDraft(lead);
-      setDraft(generated);
-      notify("DM generated. Saving your draft…");
-      await saveDraft(lead, generated);
+      const variants = makeDraftVariants(lead);
+      setDraftVariants(variants);
+      setActiveVariant(0);
+      setDraft(variants[0].message);
+      notify("4 message styles generated. Saving all options…");
+      const payloads = variants.map(item => ({
+        user_id: session.user.id, lead_id: lead.id, message_text: item.message, status: "draft"
+      }));
+      const { data, error } = await supabase.from("outreach_dm_drafts").insert(payloads).select("id");
+      if (error) throw error;
+      const latestId = data?.[data.length - 1]?.id || null;
+      if (["new", "researched"].includes(lead.status)) {
+        const { error: statusError } = await supabase.from("outreach_leads").update({ status: "draft_ready" }).eq("id", lead.id);
+        if (statusError) notify(\`Messages saved, but lead status could not be updated: \${statusError.message}\`);
+      }
+      await supabase.from("outreach_activity").insert({
+        user_id: session.user.id, lead_id: lead.id, event_type: "dm_drafted",
+        details: "Generated and saved four DM variations"
+      });
+      setSelected(current => current?.id === lead.id
+        ? { ...current, dm_draft: variants[0].message, latestDraftId: latestId, draftStatus: "draft" }
+        : current);
+      await loadLeads();
+      notify("4 message options generated and saved. Choose the best one for this lead.");
     } catch (error) {
-      notify(`Message generated, but saving failed: ${error?.message || "Please try again."}`);
+      notify(\`Could not save message options: \${error?.message || "Please try again."}\`);
     } finally {
       setGeneratingDraft(false);
     }
@@ -449,8 +467,10 @@ export default function App() {
 
     {selected && <div className="overlay" onMouseDown={e => e.target === e.currentTarget && setSelected(null)}><div className="detail-modal"><div className="modal-head"><div><div className="eyebrow">PROSPECT DETAILS</div><h2>{selected.business_name}</h2><p className="muted">{selected.instagram_handle ? `@${selected.instagram_handle}` : "No Instagram profile"} · {selected.location || "Location not set"}</p></div><button className="icon-btn" onClick={() => setSelected(null)}><X/></button></div>
       <div className="detail-links">{contactOptions(selected).map(option => <a key={option.kind} className={option.fallback ? "contact-fallback" : ""} href={option.url} target="_blank" rel="noreferrer" aria-label={`${option.fallback ? "Search for" : "Open"} ${option.label}`} title={option.fallback ? "No verified detail saved; search for this business contact" : `Open saved ${option.label} detail`}>{option.kind === "instagram" ? <Instagram size={16}/> : option.kind === "whatsapp" ? <MessageSquareText size={16}/> : option.kind === "email" ? <Mail size={16}/> : <Globe2 size={16}/>} {option.label} <ExternalLink size={13}/></a>)}</div>
-      <label className="draft-label">PERSONALIZED MESSAGE DRAFT<textarea className="draft-area" value={draft} onChange={e => setDraft(e.target.value)} rows={9}/></label>
-      <div className="draft-actions"><button className="btn secondary" onClick={() => generateAndSaveDraft(selected)} disabled={generatingDraft}><Sparkles size={15}/> {generatingDraft ? "Generating…" : "Generate & save DM"}</button><button className="btn secondary" onClick={() => saveDraft(selected,draft)}><Check size={15}/> Save draft</button>{["approved", "sent"].includes(selected.draftStatus) ? <button className="btn secondary" onClick={() => unapproveDraft(selected)} disabled={selected.draftStatus === "sent"}>Unapprove</button> : <button className="btn secondary" onClick={() => approveDraft(selected)}>Approve</button>}<button className="btn primary" onClick={() => copyDraft(draft)}><Clipboard size={15}/> Copy message</button></div>
+      <div className="draft-label">MESSAGE OPTIONS {draftVariants.length > 0 && <span className="muted">· {draftVariants.length} styles for this lead</span>}</div>
+      {draftVariants.length > 0 && <div className="variant-list">{draftVariants.map((item, index) => <button type="button" key={item.label} className={activeVariant === index ? "variant-option active" : "variant-option"} onClick={() => { setActiveVariant(index); setDraft(item.message); }}><strong>{index + 1}. {item.label}</strong><span>{item.message.slice(0, 105)}…</span></button>)}</div>}
+      <label className="draft-label">EDIT SELECTED MESSAGE<textarea className="draft-area" value={draft} onChange={e => setDraft(e.target.value)} rows={9}/></label>
+      <div className="draft-actions"><button className="btn secondary" onClick={() => generateAndSaveDraft(selected)} disabled={generatingDraft}><Sparkles size={15}/> {generatingDraft ? "Generating…" : "Generate 4 message styles"}</button><button className="btn secondary" onClick={() => saveDraft(selected,draft)}><Check size={15}/> Save draft</button>{["approved", "sent"].includes(selected.draftStatus) ? <button className="btn secondary" onClick={() => unapproveDraft(selected)} disabled={selected.draftStatus === "sent"}>Unapprove</button> : <button className="btn secondary" onClick={() => approveDraft(selected)}>Approve</button>}<button className="btn primary" onClick={() => copyDraft(draft)}><Clipboard size={15}/> Copy message</button></div>
       <div className="send-warning"><MessageSquareText size={16}/><span>Review the message, open Instagram, and send it yourself. This tool does not auto-send cold DMs.</span></div><div className="draft-actions"><button className="btn secondary" onClick={() => markSent(selected)}>Mark manually sent</button></div>
       <div className="detail-bottom"><label>Status<select value={selected.status} onChange={e => { updateStatus(selected,e.target.value); setSelected({...selected,status:e.target.value}); }} >{STATUSES.map(s => <option key={s} value={s}>{STATUS_LABELS[s]}</option>)}</select></label><button className="btn danger" onClick={() => deleteLead(selected)}><Trash2 size={15}/> Delete lead</button></div>
       <button className="text-btn edit-link" onClick={() => { setSelected(null); openEdit(selected); }}>Edit prospect details</button>
