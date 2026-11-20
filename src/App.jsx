@@ -76,11 +76,20 @@ function validHttpUrl(value) {
   catch { return false; }
 }
 function makeDraft(lead = {}) {
-  if (lead.lead_category === "underrated") return "I noticed something while researching businesses in your industry. Customers seem to struggle with finding certain information before visiting. I have a few ideas that could make that experience easier.";
-  const name = safeText(lead.business_name).trim() || "there";
+  const name = safeText(lead.business_name).trim() || "your business";
+  const category = safeText(lead.business_type).trim() || "your industry";
   const opportunity = safeText(lead.opportunity).trim();
-  const detail = opportunity
-    ? ` I noticed ${opportunity.replace(/[.!?]+$/, "")}.`
+  const evidence = safeText(lead.research_evidence).trim();
+  const notes = safeText(lead.notes).trim();
+  const observation = opportunity || evidence || notes;
+  if (lead.lead_category === "underrated") {
+    const insight = observation
+      ? `I noticed ${observation.replace(/[.!?]+$/, "")}.`
+      : `I was looking at how customers discover ${name} online and spotted a few areas where useful information could be easier to find.`;
+    return `Hi ${name}! I came across your ${category} business and noticed an opportunity that may help make things easier for potential customers. ${insight} A clearer online presence could help people quickly understand what you offer, find the details they need before visiting, and feel confident getting in touch. I have a couple of practical ideas I'd be happy to share. Would you be open to a quick chat?\n\n— WebForge Signature`;
+  }
+  const detail = observation
+    ? ` I noticed ${observation.replace(/[.!?]+$/, "")}.`
     : " I came across your business and wanted to reach out.";
   return `Hi ${name}! 👋 I'm reaching out from WebForge Signature, a Sri Lankan web design team.${detail} We build modern websites that help businesses present their services clearly and make it easier for customers to contact them. Would you be open to seeing a few ideas for your business?\n\nhttps://lkwebforge-design.github.io/WEBFORGE-SIGNATURE/`;
 }
@@ -157,6 +166,7 @@ export default function App() {
   const [toast, setToast] = useState("");
   const [selected, setSelected] = useState(null);
   const [draft, setDraft] = useState("");
+  const [generatingDraft, setGeneratingDraft] = useState(false);
   const [busyImport, setBusyImport] = useState(false);
   const [showBulkQueue, setShowBulkQueue] = useState(false);
 
@@ -253,13 +263,33 @@ export default function App() {
     const result = lead.latestDraftId
       ? await supabase.from("outreach_dm_drafts").update({ message_text: text, status: lead.draftStatus === "unapproved" ? "unapproved" : "draft" }).eq("id", lead.latestDraftId)
       : await supabase.from("outreach_dm_drafts").insert(payload);
-    if (result.error) { notify(result.error.message); return; }
+    if (result.error) { notify(`Could not save draft: ${result.error.message}`); return false; }
     if (["new", "researched"].includes(lead.status)) {
       const { error } = await supabase.from("outreach_leads").update({ status: "draft_ready" }).eq("id", lead.id);
-      if (error) notify(error.message);
+      if (error) notify(`Draft saved, but lead status could not be updated: ${error.message}`);
     }
-    await supabase.from("outreach_activity").insert({ user_id: session.user.id, lead_id: lead.id, event_type: "dm_drafted", details: "DM draft saved" });
-    notify("Draft saved."); await loadLeads();
+    const activity = await supabase.from("outreach_activity").insert({ user_id: session.user.id, lead_id: lead.id, event_type: "dm_drafted", details: "DM draft saved" });
+    if (activity.error) notify(`Draft saved, but activity log failed: ${activity.error.message}`);
+    else notify("Draft saved successfully.");
+    await loadLeads();
+    return true;
+  }
+
+  async function generateAndSaveDraft(lead) {
+    if (!lead?.id || generatingDraft) return;
+    setGeneratingDraft(true);
+    try {
+      const generated = makeDraft(lead);
+      setDraft(generated);
+      const saved = await saveDraft(lead, generated);
+      if (saved) setSelected(current => current?.id === lead.id
+        ? { ...current, dm_draft: generated, draftStatus: current.draftStatus === "unapproved" ? "unapproved" : "draft" }
+        : current);
+    } catch (error) {
+      notify(`Could not generate the DM: ${error?.message || "Please try again."}`);
+    } finally {
+      setGeneratingDraft(false);
+    }
   }
   async function importCsv(file) {
     setBusyImport(true);
@@ -418,7 +448,7 @@ export default function App() {
     {selected && <div className="overlay" onMouseDown={e => e.target === e.currentTarget && setSelected(null)}><div className="detail-modal"><div className="modal-head"><div><div className="eyebrow">PROSPECT DETAILS</div><h2>{selected.business_name}</h2><p className="muted">{selected.instagram_handle ? `@${selected.instagram_handle}` : "No Instagram profile"} · {selected.location || "Location not set"}</p></div><button className="icon-btn" onClick={() => setSelected(null)}><X/></button></div>
       <div className="detail-links">{contactOptions(selected).map(option => <a key={option.kind} className={option.fallback ? "contact-fallback" : ""} href={option.url} target="_blank" rel="noreferrer" aria-label={`${option.fallback ? "Search for" : "Open"} ${option.label}`} title={option.fallback ? "No verified detail saved; search for this business contact" : `Open saved ${option.label} detail`}>{option.kind === "instagram" ? <Instagram size={16}/> : option.kind === "whatsapp" ? <MessageSquareText size={16}/> : option.kind === "email" ? <Mail size={16}/> : <Globe2 size={16}/>} {option.label} <ExternalLink size={13}/></a>)}</div>
       <label className="draft-label">PERSONALIZED MESSAGE DRAFT<textarea className="draft-area" value={draft} onChange={e => setDraft(e.target.value)} rows={9}/></label>
-      <div className="draft-actions"><button className="btn secondary" onClick={() => setDraft(makeDraft(selected))}><Sparkles size={15}/> Regenerate draft</button><button className="btn secondary" onClick={() => saveDraft(selected,draft)}><Check size={15}/> Save draft</button>{["approved", "sent"].includes(selected.draftStatus) ? <button className="btn secondary" onClick={() => unapproveDraft(selected)} disabled={selected.draftStatus === "sent"}>Unapprove</button> : <button className="btn secondary" onClick={() => approveDraft(selected)}>Approve</button>}<button className="btn primary" onClick={() => copyDraft(draft)}><Clipboard size={15}/> Copy message</button></div>
+      <div className="draft-actions"><button className="btn secondary" onClick={() => selected.lead_category === "underrated" ? generateAndSaveDraft(selected) : setDraft(makeDraft(selected))} disabled={generatingDraft}><Sparkles size={15}/> {generatingDraft ? "Generating…" : selected.lead_category === "underrated" ? "Generate & save DM" : "Regenerate draft"}</button><button className="btn secondary" onClick={() => saveDraft(selected,draft)}><Check size={15}/> Save draft</button>{["approved", "sent"].includes(selected.draftStatus) ? <button className="btn secondary" onClick={() => unapproveDraft(selected)} disabled={selected.draftStatus === "sent"}>Unapprove</button> : <button className="btn secondary" onClick={() => approveDraft(selected)}>Approve</button>}<button className="btn primary" onClick={() => copyDraft(draft)}><Clipboard size={15}/> Copy message</button></div>
       <div className="send-warning"><MessageSquareText size={16}/><span>Review the message, open Instagram, and send it yourself. This tool does not auto-send cold DMs.</span></div><div className="draft-actions"><button className="btn secondary" onClick={() => markSent(selected)}>Mark manually sent</button></div>
       <div className="detail-bottom"><label>Status<select value={selected.status} onChange={e => { updateStatus(selected,e.target.value); setSelected({...selected,status:e.target.value}); }} >{STATUSES.map(s => <option key={s} value={s}>{STATUS_LABELS[s]}</option>)}</select></label><button className="btn danger" onClick={() => deleteLead(selected)}><Trash2 size={15}/> Delete lead</button></div>
       <button className="text-btn edit-link" onClick={() => { setSelected(null); openEdit(selected); }}>Edit prospect details</button>
