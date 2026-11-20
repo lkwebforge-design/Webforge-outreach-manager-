@@ -59,7 +59,7 @@ function contactTarget(lead) {
 }
 function normalizeLead(lead = {}, draft = null) {
   const normalized = { ...lead };
-  for (const key of ["business_name", "instagram_handle", "instagram_profile_url", "website_url", "location", "business_type", "opportunity", "notes", "email", "phone", "contact_name"]) {
+  for (const key of ["business_name", "instagram_handle", "instagram_profile_url", "website_url", "location", "business_type", "opportunity", "notes", "email", "phone", "contact_name", "lead_category", "research_evidence"]) {
     normalized[key] = safeText(lead[key]).trim();
   }
   normalized.instagram_handle = cleanHandle(normalized.instagram_handle);
@@ -76,6 +76,7 @@ function validHttpUrl(value) {
   catch { return false; }
 }
 function makeDraft(lead = {}) {
+  if (lead.lead_category === "underrated") return "I noticed something while researching businesses in your industry. Customers seem to struggle with finding certain information before visiting. I have a few ideas that could make that experience easier.";
   const name = safeText(lead.business_name).trim() || "there";
   const opportunity = safeText(lead.opportunity).trim();
   const detail = opportunity
@@ -186,7 +187,8 @@ export default function App() {
     const section = view === "queue" ? lead.draftStatus === "draft"
       : view === "approved" ? lead.draftStatus === "approved"
       : view === "unapproved" ? lead.draftStatus === "unapproved"
-      : view === "followups" ? ["contacted", "replied", "interested"].includes(lead.status) : true;
+      : view === "followups" ? ["contacted", "replied", "interested"].includes(lead.status)
+      : view === "underrated" ? lead.lead_category === "underrated" : true;
     return matches && status && section;
   }), [leads, query, statusFilter, view]);
 
@@ -196,7 +198,8 @@ export default function App() {
     contacted: leads.filter(l => ["contacted", "replied", "interested"].includes(l.status)).length,
     clients: leads.filter(l => l.status === "client").length,
     approved: leads.filter(l => l.draftStatus === "approved").length,
-    unapproved: leads.filter(l => l.draftStatus === "unapproved").length
+    unapproved: leads.filter(l => l.draftStatus === "unapproved").length,
+    underrated: leads.filter(l => l.lead_category === "underrated").length
   }), [leads]);
 
   function openAdd() { setEditing(null); setForm(emptyLead); setShowAdd(true); }
@@ -220,7 +223,9 @@ export default function App() {
       location: safeText(form.location).trim() || null,
       business_type: safeText(form.business_type).trim() || null,
       opportunity: safeText(form.opportunity).trim() || null,
-      notes: safeText(form.notes).trim() || null
+      notes: safeText(form.notes).trim() || null,
+      lead_category: form.lead_category || "standard",
+      research_evidence: safeText(form.research_evidence).trim() || null
     };
     let result;
     if (editing) result = await supabase.from("outreach_leads").update(payload).eq("id", editing.id).select().single();
@@ -279,7 +284,7 @@ export default function App() {
     setBusyImport(false);
   }
   function exportCsv() {
-    const headers = ["business_name","instagram_handle","instagram_profile_url","website_url","location","business_type","opportunity","notes","dm_draft","status"];
+    const headers = ["business_name","instagram_handle","instagram_profile_url","website_url","location","business_type","opportunity","notes","dm_draft","status","lead_category","research_evidence"];
     const csv = [headers.join(","), ...leads.map(l => headers.map(h => csvCell(l[h])).join(","))].join("\n");
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
     const a = document.createElement("a"); a.href = url; a.download = "webforge-leads.csv"; a.click(); URL.revokeObjectURL(url);
@@ -374,6 +379,7 @@ export default function App() {
       <button className={view === "approved" ? "nav-item active" : "nav-item"} onClick={() => setView("approved")}><Check size={17}/> Approved prospects <span>{stats.approved}</span></button>
       <button className={view === "unapproved" ? "nav-item active" : "nav-item"} onClick={() => setView("unapproved")}><X size={17}/> Unapproved <span>{stats.unapproved}</span></button>
       <button className={view === "followups" ? "nav-item active" : "nav-item"} onClick={() => setView("followups")}><MessageSquareText size={17}/> Follow-ups</button>
+      <button className={view === "underrated" ? "nav-item active" : "nav-item"} onClick={() => {setView("underrated");setStatusFilter("all");}}><Sparkles size={17}/> Underrated Leads <span>{stats.underrated}</span></button>
       <div className="sidebar-bottom">
         <div className="account"><div className="avatar">{session.user.email?.[0]?.toUpperCase() || "W"}</div><div><strong>WebForge</strong><small>{session.user.email}</small></div></div>
         <button className="nav-item" onClick={() => supabase.auth.signOut()}><LogOut size={17}/> Sign out</button>
@@ -381,8 +387,8 @@ export default function App() {
     </aside>
 
     <main className="main">
-      <header className="topbar"><div className="crumb">WebForge Signature <span>/</span> {view === "all" ? "Overview" : view === "queue" ? "Draft queue" : view === "approved" ? "Approved prospects" : view === "unapproved" ? "Unapproved prospects" : "Follow-ups"}</div><div className="top-actions"><span className="secure"><span/> Private workspace</span><button className="btn primary" onClick={openAdd}><CirclePlus size={16}/> Add lead</button></div></header>
-      <section className="page-head"><div><div className="eyebrow">YOUR SALES PIPELINE</div><h1>{view === "all" ? "Outreach overview" : view === "queue" ? "Ready for review" : view === "approved" ? "Approved prospects" : view === "unapproved" ? "Unapproved prospects" : "Keep conversations moving."}</h1><p className="muted">{view === "queue" ? "Review saved drafts and approve the messages you want to use." : view === "approved" ? "These prospects have an approved message and are ready for your manual outreach batch." : view === "unapproved" ? "Prospects you reviewed and chose not to approve. They stay separate from the draft queue." : view === "followups" ? "Track prospects who have already been contacted or shown interest." : "A clear view of every prospect, every draft, and every opportunity."}</p></div><div className="head-actions"><label className="btn secondary import-btn"><Upload size={16}/>{busyImport ? "Importing…" : "Import CSV"}<input type="file" accept=".csv,text/csv" disabled={busyImport} onChange={e => e.target.files?.[0] && importCsv(e.target.files[0])}/></label><button className="btn secondary" onClick={exportCsv}><Download size={16}/> Export</button></div></section>
+      <header className="topbar"><div className="crumb">WebForge Signature <span>/</span> {view === "all" ? "Overview" : view === "queue" ? "Draft queue" : view === "approved" ? "Approved prospects" : view === "unapproved" ? "Unapproved prospects" : view === "underrated" ? "Underrated Leads" : "Follow-ups"}</div><div className="top-actions"><span className="secure"><span/> Private workspace</span><button className="btn primary" onClick={openAdd}><CirclePlus size={16}/> Add lead</button></div></header>
+      <section className="page-head"><div><div className="eyebrow">YOUR SALES PIPELINE</div><h1>{view === "all" ? "Outreach overview" : view === "queue" ? "Ready for review" : view === "approved" ? "Approved prospects" : view === "unapproved" ? "Unapproved prospects" : view === "underrated" ? "Underrated Leads" : "Keep conversations moving."}</h1><p className="muted">{view === "queue" ? "Review saved drafts and approve the messages you want to use." : view === "approved" ? "These prospects have an approved message and are ready for your manual outreach batch." : view === "unapproved" ? "Prospects you reviewed and chose not to approve. They stay separate from the draft queue." : view === "followups" ? "Track prospects who have already been contacted or shown interest." : view === "underrated" ? "Businesses with an underserved online presence and a ready-to-use customer-focused DM." : "A clear view of every prospect, every draft, and every opportunity."}</p></div><div className="head-actions"><label className="btn secondary import-btn"><Upload size={16}/>{busyImport ? "Importing…" : "Import CSV"}<input type="file" accept=".csv,text/csv" disabled={busyImport} onChange={e => e.target.files?.[0] && importCsv(e.target.files[0])}/></label><button className="btn secondary" onClick={exportCsv}><Download size={16}/> Export</button></div></section>
 
       <section className="stats-grid">
         <Stat icon={<Users/>} label="Total prospects" value={stats.total} note="All saved leads" active={view === "all"} onClick={() => {setView("all");setStatusFilter("all");}}/>
@@ -395,7 +401,7 @@ export default function App() {
       </section>
 
       <section className="panel">
-        <div className="panel-head"><div><h2>{view === "queue" ? "Message review queue" : view === "approved" ? "Approved prospects" : view === "unapproved" ? "Unapproved prospects" : view === "followups" ? "Follow-up pipeline" : "All prospects"}</h2><p className="muted">{filtered.length} records · duplicate Instagram handles are blocked</p></div><div className="filters"><div className="searchbox"><Search size={16}/><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search business or handle"/></div><div className="select-wrap"><Filter size={15}/><select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}><option value="all">All statuses</option>{STATUSES.map(s => <option key={s} value={s}>{STATUS_LABELS[s]}</option>)}</select><ChevronDown size={14}/></div></div>{view === "all" && <button className="btn primary" onClick={approveAllProspects} disabled={saving || !leads.some(l => !["approved", "sent", "unapproved"].includes(l.draftStatus))}><Check size={15}/>{saving ? "Approving…" : "Approve all prospects"}</button>}</div>
+        <div className="panel-head"><div><h2>{view === "queue" ? "Message review queue" : view === "approved" ? "Approved prospects" : view === "unapproved" ? "Unapproved prospects" : view === "followups" ? "Follow-up pipeline" : view === "underrated" ? "Underrated Leads" : "All prospects"}</h2><p className="muted">{filtered.length} records · duplicate Instagram handles are blocked</p></div><div className="filters"><div className="searchbox"><Search size={16}/><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search business or handle"/></div><div className="select-wrap"><Filter size={15}/><select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}><option value="all">All statuses</option>{STATUSES.map(s => <option key={s} value={s}>{STATUS_LABELS[s]}</option>)}</select><ChevronDown size={14}/></div></div>{view === "all" && <button className="btn primary" onClick={approveAllProspects} disabled={saving || !leads.some(l => !["approved", "sent", "unapproved"].includes(l.draftStatus))}><Check size={15}/>{saving ? "Approving…" : "Approve all prospects"}</button>}</div>
         {filtered.length === 0 ? <div className="empty"><div className="empty-icon"><Instagram/></div><h3>{view === "approved" ? "No approved prospects yet" : view === "unapproved" ? "No unapproved prospects" : "No prospects here yet"}</h3><p className="muted">{view === "approved" ? "Approve a saved message draft to add a business to this list." : view === "unapproved" ? "When you unapprove a prospect, it will appear here." : "Add a lead manually or import your verified Instagram prospect list."}</p>{view !== "approved" && <button className="btn primary" onClick={openAdd}><CirclePlus size={16}/> Add your first lead</button>}</div> :
           <div className="table-wrap"><table><thead><tr><th>BUSINESS</th><th>LOCATION</th><th>OPPORTUNITY</th><th>STATUS</th><th>APPROVAL</th><th>ADDED</th><th></th></tr></thead><tbody>{filtered.map(lead => <tr key={lead.id} onClick={() => { setSelected(lead); setDraft(safeText(lead.dm_draft) || makeDraft(lead)); }}><td><div className="business-cell"><div className="ig-avatar"><Instagram size={16}/></div><div><strong>{lead.business_name}</strong><small>@{lead.instagram_handle}</small></div></div></td><td className="location-cell">{lead.location || "—"}</td><td className="opportunity">{lead.opportunity || lead.business_type || "Needs review"}</td><td><span className={`status status-${lead.status}`}>{STATUS_LABELS[lead.status]}</span></td><td><span className={`approval-pill ${["approved", "sent"].includes(lead.draftStatus) ? "is-approved" : "is-pending"}`}>{["approved", "sent"].includes(lead.draftStatus) ? "Approved" : "Not approved"}</span></td><td>{new Date(lead.created_at).toLocaleDateString()}</td><td><button className="icon-btn" onClick={e => { e.stopPropagation(); setSelected(lead); setDraft(safeText(lead.dm_draft) || makeDraft(lead)); }}><ArrowUpRight size={17}/></button></td></tr>)}</tbody></table></div>}
       </section>
