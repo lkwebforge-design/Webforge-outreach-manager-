@@ -372,32 +372,60 @@ export default function App() {
   async function approveAllProspects(scope = "all") {
     const pool = scope === "underrated" ? leads.filter(lead => lead.lead_category === "underrated") : leads;
     const eligible = pool.filter(lead => !["approved", "sent", "unapproved"].includes(lead.draftStatus));
-    if (!eligible.length) { notify(scope === "underrated" ? "No underrated leads are waiting for approval." : "No prospects are waiting for approval."); return; }
+    if (!eligible.length) {
+      notify(scope === "underrated" ? "All underrated leads have already been reviewed." : "All prospects have already been reviewed.");
+      return;
+    }
     const groupLabel = scope === "underrated" ? "underrated leads" : "prospects";
     const confirmed = window.confirm(`Prepare and approve messages for all ${eligible.length} eligible ${groupLabel}? This only approves drafts; it will not send any messages.`);
     if (!confirmed) return;
+
     setSaving(true);
     const now = new Date().toISOString();
-    const missing = eligible.filter(lead => !lead.latestDraftId);
-    if (missing.length) {
-      const { error } = await supabase.from("outreach_dm_drafts").insert(missing.map(lead => ({
-        user_id: session.user.id, lead_id: lead.id, message_text: makeDraft(lead), status: "approved", approved_at: now
+    const leadIds = eligible.map(lead => lead.id);
+    try {
+      // Update by lead_id rather than cached draft IDs, so stale UI IDs cannot leave
+      // a prospect looking unapproved after a successful bulk action.
+      const { data: updated, error: updateError } = await supabase
+        .from("outreach_dm_drafts")
+        .update({ status: "approved", approved_at: now })
+        .in("lead_id", leadIds)
+        .in("status", ["draft", "unapproved"])
+        .select("id, lead_id");
+      if (updateError) throw updateError;
+
+      const updatedLeadIds = new Set((updated || []).map(row => row.lead_id));
+      const needsDraft = eligible.filter(lead => !updatedLeadIds.has(lead.id));
+      if (needsDraft.length) {
+        const { error: insertError } = await supabase.from("outreach_dm_drafts").insert(needsDraft.map(lead => ({
+          user_id: session.user.id,
+          lead_id: lead.id,
+          message_text: lead.dm_draft || makeDraft(lead),
+          status: "approved",
+          approved_at: now
+        })));
+        if (insertError) throw insertError;
+      }
+
+      const { error: activityError } = await supabase.from("outreach_activity").insert(eligible.map(lead => ({
+        user_id: session.user.id,
+        lead_id: lead.id,
+        event_type: "dm_approved",
+        details: "Prospect draft prepared and approved in bulk for manual sending"
       })));
-      if (error) { notify(error.message); setSaving(false); return; }
+      if (activityError) notify(`Approved, but activity logging failed: ${activityError.message}`);
+
+      // Immediately reflect the completed action; then reconcile with Supabase.
+      setLeads(current => current.map(lead => leadIds.includes(lead.id)
+        ? { ...lead, draftStatus: "approved" }
+        : lead));
+      notify(`Approved ${eligible.length} prospects. No messages were sent.`);
+      await loadLeads();
+    } catch (error) {
+      notify(`Could not approve all leads: ${error?.message || "Please try again."}`);
+    } finally {
+      setSaving(false);
     }
-    const existingIds = eligible.filter(lead => lead.latestDraftId).map(lead => lead.latestDraftId);
-    if (existingIds.length) {
-      const { error } = await supabase.from("outreach_dm_drafts").update({ status: "approved", approved_at: now })
-        .in("id", existingIds).in("status", ["draft", "unapproved"]);
-      if (error) { notify(error.message); setSaving(false); return; }
-    }
-    await supabase.from("outreach_activity").insert(eligible.map(lead => ({
-      user_id: session.user.id, lead_id: lead.id, event_type: "dm_approved",
-      details: "Prospect draft prepared and approved in bulk for manual sending"
-    })));
-    setSaving(false);
-    notify(`Approved ${eligible.length} prospects. No messages were sent.`);
-    await loadLeads();
   }
 
   async function markSent(lead) {
