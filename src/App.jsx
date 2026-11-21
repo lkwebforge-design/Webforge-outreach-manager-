@@ -479,17 +479,23 @@ export default function App() {
       if (leadError) throw leadError;
       if (!updatedLead) throw new Error("The lead status was not updated. Check your workspace permissions and try again.");
 
-      await supabase.from("outreach_activity").insert({
+      const { error: activityError } = await supabase.from("outreach_activity").insert({
         user_id: session.user.id,
         lead_id: lead.id,
         event_type: "dm_sent_manually",
         details: "User marked manually sent"
       });
-      setSelected(null);
+      if (activityError) console.warn("Could not log manual-send activity:", activityError.message);
+
+      // Move the prospect into the In conversation view immediately.
       setLeads(current => current.map(item => item.id === lead.id
-        ? { ...item, status: "contacted", draftStatus: "sent" }
+        ? { ...item, status: "contacted", draftStatus: "sent", last_contacted_at: now }
         : item));
-      notify("Marked as manually sent.");
+      setSelected(null);
+      setShowBulkQueue(false);
+      setStatusFilter("all");
+      setView("followups");
+      notify(`${lead.business_name || "Prospect"} moved to In conversation.`);
       await loadLeads();
     } catch (error) {
       notify(`Could not mark as manually sent: ${error?.message || "Please try again."}`);
