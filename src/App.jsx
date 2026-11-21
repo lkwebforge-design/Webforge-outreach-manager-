@@ -285,26 +285,39 @@ export default function App() {
       setDraftVariants(variants);
       setActiveVariant(0);
       setDraft(variants[0].message);
-      notify("4 message styles generated. Saving all options…");
-      const payloads = variants.map(item => ({
-        user_id: session.user.id, lead_id: lead.id, message_text: item.message, status: "draft"
-      }));
-      const { data, error } = await supabase.from("outreach_dm_drafts").insert(payloads).select("id");
-      if (error) throw error;
-      const latestId = data?.[0]?.id || null;
+
+      // Keep one canonical draft row per generation. The alternative styles stay
+      // in the editor state; inserting four rows caused ambiguous "latest" drafts.
+      const payload = {
+        user_id: session.user.id,
+        lead_id: lead.id,
+        message_text: variants[0].message,
+        status: "draft"
+      };
+      const result = lead.latestDraftId
+        ? await supabase.from("outreach_dm_drafts").update(payload).eq("id", lead.latestDraftId).select("id").single()
+        : await supabase.from("outreach_dm_drafts").insert(payload).select("id").single();
+      if (result.error) throw result.error;
+      const latestId = result.data?.id || lead.latestDraftId || null;
+
       if (["new", "researched"].includes(lead.status)) {
         const { error: statusError } = await supabase.from("outreach_leads").update({ status: "draft_ready" }).eq("id", lead.id);
-        if (statusError) notify(`Messages saved, but lead status could not be updated: ${statusError.message}`);
+        if (statusError) throw statusError;
       }
-      await supabase.from("outreach_activity").insert({
+      const { error: activityError } = await supabase.from("outreach_activity").insert({
         user_id: session.user.id, lead_id: lead.id, event_type: "dm_drafted",
-        details: "Generated and saved four DM variations"
+        details: "Generated four DM variations; saved the selected draft"
       });
+      if (activityError) throw activityError;
+
       setSelected(current => current?.id === lead.id
-        ? { ...current, dm_draft: variants[0].message, latestDraftId: latestId, draftStatus: "draft" }
+        ? { ...current, dm_draft: variants[0].message, latestDraftId: latestId, draftStatus: "draft", status: ["new", "researched"].includes(lead.status) ? "draft_ready" : current.status }
         : current);
+      setLeads(current => current.map(item => item.id === lead.id
+        ? { ...item, dm_draft: variants[0].message, latestDraftId: latestId, draftStatus: "draft", status: ["new", "researched"].includes(lead.status) ? "draft_ready" : item.status }
+        : item));
       await loadLeads();
-      notify("4 message options generated and saved. Choose the best one for this lead.");
+      notify("4 message styles generated. Your selected draft is ready for approval.");
     } catch (error) {
       notify(`Could not save message options: ${error?.message || "Please try again."}`);
     } finally {
@@ -429,20 +442,58 @@ export default function App() {
   }
 
   async function markSent(lead) {
+    if (!lead?.id) return;
     const now = new Date().toISOString();
     const message = (selected?.id === lead.id ? draft : lead.dm_draft) || makeDraft(lead);
-    let error = null;
-    if (lead.latestDraftId) {
-      ({ error } = await supabase.from("outreach_dm_drafts").update({ message_text: message, status: "sent", sent_at: now, sent_method: "manual_instagram" }).eq("id", lead.latestDraftId));
-    } else {
-      const result = await supabase.from("outreach_dm_drafts").insert({ user_id: session.user.id, lead_id: lead.id, message_text: message, status: "sent", sent_at: now, sent_method: "manual_instagram" });
-      error = result.error;
+    try {
+      // Mark every outstanding draft for this lead as sent. Older versions of
+      // the generator could create four rows, so updating only latestDraftId
+      // left some leads appearing pending after the user marked them sent.
+      const { data: updatedDrafts, error: draftError } = await supabase
+        .from("outreach_dm_drafts")
+        .update({ message_text: message, status: "sent", sent_at: now, sent_method: "manual_instagram" })
+        .eq("lead_id", lead.id)
+        .in("status", ["draft", "approved", "unapproved"])
+        .select("id");
+      if (draftError) throw draftError;
+
+      if (!updatedDrafts?.length) {
+        // A lead may have no draft row yet, or only historical rows.
+        const { error: insertError } = await supabase.from("outreach_dm_drafts").insert({
+          user_id: session.user.id,
+          lead_id: lead.id,
+          message_text: message,
+          status: "sent",
+          sent_at: now,
+          sent_method: "manual_instagram"
+        });
+        if (insertError) throw insertError;
+      }
+
+      const { data: updatedLead, error: leadError } = await supabase
+        .from("outreach_leads")
+        .update({ status: "contacted", last_contacted_at: now })
+        .eq("id", lead.id)
+        .select("id")
+        .maybeSingle();
+      if (leadError) throw leadError;
+      if (!updatedLead) throw new Error("The lead status was not updated. Check your workspace permissions and try again.");
+
+      await supabase.from("outreach_activity").insert({
+        user_id: session.user.id,
+        lead_id: lead.id,
+        event_type: "dm_sent_manually",
+        details: "User marked manually sent"
+      });
+      setSelected(null);
+      setLeads(current => current.map(item => item.id === lead.id
+        ? { ...item, status: "contacted", draftStatus: "sent" }
+        : item));
+      notify("Marked as manually sent.");
+      await loadLeads();
+    } catch (error) {
+      notify(`Could not mark as manually sent: ${error?.message || "Please try again."}`);
     }
-    if (error) { notify(error.message); return; }
-    const leadUpdate = await supabase.from("outreach_leads").update({ status: "contacted", last_contacted_at: now }).eq("id", lead.id);
-    if (leadUpdate.error) { notify(leadUpdate.error.message); return; }
-    await supabase.from("outreach_activity").insert({ user_id: session.user.id, lead_id: lead.id, event_type: "dm_sent_manually", details: "User marked manually sent" });
-    notify("Marked as manually sent."); setSelected(null); await loadLeads();
   }
   async function copyDraft(text) { await navigator.clipboard.writeText(text); notify("DM copied. Review it before sending."); }
 
@@ -486,7 +537,7 @@ export default function App() {
       <section className="panel">
         <div className="panel-head"><div><h2>{view === "queue" ? "Message review queue" : view === "approved" ? "Approved prospects" : view === "unapproved" ? "Unapproved prospects" : view === "followups" ? "Follow-up pipeline" : view === "underrated" ? "Underrated Leads" : "All prospects"}</h2><p className="muted">{filtered.length} records · duplicate Instagram handles are blocked</p></div><div className="filters"><div className="searchbox"><Search size={16}/><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search business or handle"/></div><div className="select-wrap"><Filter size={15}/><select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}><option value="all">All statuses</option>{STATUSES.map(s => <option key={s} value={s}>{STATUS_LABELS[s]}</option>)}</select><ChevronDown size={14}/></div></div>{view === "all" && <button className="btn primary" onClick={() => approveAllProspects("all")} disabled={saving || !leads.some(l => !["approved", "sent", "unapproved"].includes(l.draftStatus))}><Check size={15}/>{saving ? "Approving…" : "Approve all prospects"}</button>}</div>
         {filtered.length === 0 ? <div className="empty"><div className="empty-icon"><Instagram/></div><h3>{view === "approved" ? "No approved prospects yet" : view === "unapproved" ? "No unapproved prospects" : "No prospects here yet"}</h3><p className="muted">{view === "approved" ? "Approve a saved message draft to add a business to this list." : view === "unapproved" ? "When you unapprove a prospect, it will appear here." : "Add a lead manually or import your verified Instagram prospect list."}</p>{view !== "approved" && <button className="btn primary" onClick={openAdd}><CirclePlus size={16}/> Add your first lead</button>}</div> :
-          <div className="table-wrap"><table><thead><tr><th>BUSINESS</th><th>LOCATION</th><th>OPPORTUNITY</th><th>STATUS</th><th>APPROVAL</th><th>ADDED</th><th></th></tr></thead><tbody>{filtered.map(lead => <tr key={lead.id} onClick={() => { setSelected(lead); setDraftVariants([]); setActiveVariant(0); setDraft(safeText(lead.dm_draft) || makeDraft(lead)); }}><td><div className="business-cell"><div className="ig-avatar"><Instagram size={16}/></div><div><strong>{lead.business_name}</strong><small>@{lead.instagram_handle}</small></div></div></td><td className="location-cell">{lead.location || "—"}</td><td className="opportunity">{lead.opportunity || lead.business_type || "Needs review"}</td><td><span className={`status status-${lead.status}`}>{STATUS_LABELS[lead.status]}</span></td><td><span className={`approval-pill ${["approved", "sent"].includes(lead.draftStatus) ? "is-approved" : "is-pending"}`}>{["approved", "sent"].includes(lead.draftStatus) ? "Approved" : "Not approved"}</span></td><td>{new Date(lead.created_at).toLocaleDateString()}</td><td><button className="icon-btn" onClick={e => { e.stopPropagation(); setSelected(lead); setDraft(safeText(lead.dm_draft) || makeDraft(lead)); }}><ArrowUpRight size={17}/></button></td></tr>)}</tbody></table></div>}
+          <div className="table-wrap"><table><thead><tr><th>BUSINESS</th><th>LOCATION</th><th>OPPORTUNITY</th><th>STATUS</th><th>APPROVAL</th><th>ADDED</th><th></th></tr></thead><tbody>{filtered.map(lead => <tr key={lead.id} onClick={() => { setSelected(lead); setDraftVariants([]); setActiveVariant(0); setDraft(safeText(lead.dm_draft) || makeDraft(lead)); }}><td><div className="business-cell"><div className="ig-avatar"><Instagram size={16}/></div><div><strong>{lead.business_name}</strong><small>@{lead.instagram_handle}</small></div></div></td><td className="location-cell">{lead.location || "—"}</td><td className="opportunity">{lead.opportunity || lead.business_type || "Needs review"}</td><td><span className={`status status-${lead.status}`}>{STATUS_LABELS[lead.status]}</span></td><td><span className={`approval-pill ${["approved", "sent"].includes(lead.draftStatus) ? "is-approved" : "is-pending"}`}>{lead.draftStatus === "approved" || lead.draftStatus === "sent" ? "Approved" : lead.draftStatus === "draft" ? "Draft ready" : lead.draftStatus === "unapproved" ? "Unapproved" : "No draft"}</span></td><td>{new Date(lead.created_at).toLocaleDateString()}</td><td><button className="icon-btn" onClick={e => { e.stopPropagation(); setSelected(lead); setDraft(safeText(lead.dm_draft) || makeDraft(lead)); }}><ArrowUpRight size={17}/></button></td></tr>)}</tbody></table></div>}
       </section>
       {view === "approved" && filtered.length > 0 && <div className="bulk-bar"><div><strong>{filtered.length} approved prospect{filtered.length === 1 ? "" : "s"}</strong><small>Messages are prepared for manual sending. Nothing is sent automatically.</small></div><button className="btn primary" onClick={() => setShowBulkQueue(true)}><Send size={15}/> Start bulk-send queue</button></div>}
       <footer className="footer-note"><span><Check size={14}/> Duplicate protection active</span><span>Manual review before every Instagram send · WebForge Signature</span></footer>
